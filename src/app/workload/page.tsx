@@ -30,46 +30,108 @@ function CardValue({ label, value, unit, color, subtitle }: { label: string; val
   );
 }
 
-const SHAPE_PATHS: Record<string, string> = {
-  'BOXY': 'M 15 280 L 85 280 L 85 40 L 65 20 L 35 20 L 15 40 Z',
-  'FLAT': 'M 20 280 L 80 280 L 80 50 L 70 20 L 30 20 L 20 50 Z',
-  'ROUNDED': 'M 25 260 Q 50 290 75 260 L 80 80 Q 80 20 50 15 Q 20 20 20 80 Z',
-  'STANDARD': 'M 25 280 L 75 280 L 80 150 L 80 70 Q 50 10 50 10 Q 50 10 20 70 L 20 150 Z',
-  'FULL': 'M 20 270 Q 50 290 80 270 L 85 100 Q 85 30 50 15 Q 15 30 15 100 Z',
-  'SLENDER': 'M 35 280 Q 50 290 65 280 L 75 150 Q 80 70 50 10 Q 20 70 25 150 Z',
-};
-
-function VesselShapeVisualizer({ category }: { category: VesselCategory }) {
+function VesselShapeVisualizer({ category, dim, condition }: { category: VesselCategory, dim: InputDimensions, condition: VesselCondition }) {
   const shapeType = VESSEL_FACTORS[category].shape.type;
-  const path = SHAPE_PATHS[shapeType] || SHAPE_PATHS['STANDARD'];
+  const [view, setView] = useState<'PLAN' | 'PROFILE'>('PLAN');
   
+  const stations = useMemo(() => {
+    try {
+      if (!dim.L || !dim.B || !dim.D || dim.L <= 0 || dim.B <= 0 || dim.D <= 0) return null;
+      return calculateWorkload(category, condition, dim, { mh: 0, material: 0, coating: 0, disposal: 0 }).stations;
+    } catch {
+      return null;
+    }
+  }, [category, dim, condition]);
+
+  const planPath = useMemo(() => {
+    if (!stations || stations.length === 0) return 'M 0,50 L 300,50 Z';
+    
+    const ptsUpper = stations.map(st => {
+      const x = (st.pos / dim.L) * 300;
+      const y = 50 - ((st.halfBreadth / (dim.B / 2)) * 40);
+      return `${x},${y}`;
+    });
+    const ptsLower = [...stations].reverse().map(st => {
+      const x = (st.pos / dim.L) * 300;
+      const y = 50 + ((st.halfBreadth / (dim.B / 2)) * 40);
+      return `${x},${y}`;
+    });
+    
+    return `M ${ptsUpper.join(' L ')} L ${ptsLower.join(' L ')} Z`;
+  }, [stations, dim]);
+
+  const profilePath = useMemo(() => {
+    const shapeType = VESSEL_FACTORS[category].shape.type;
+    
+    // x=0 is stern, x=300 is bow. Deck y=30, Keel y=90
+    let d = `M 0,30 L 300,30 L 300,90 L 0,90 Z`; 
+    
+    if (shapeType === 'ROUNDED' || shapeType === 'SLENDER') {
+      d = `M 0,30 L 300,30 L 270,90 L 20,90 Q 0,90 0,60 Z`;
+    } else if (shapeType === 'STANDARD' || shapeType === 'FULL') {
+      d = `M 0,30 L 300,30 L 280,90 L 10,90 Z`;
+    } else if (shapeType === 'FLAT' || shapeType === 'BOXY') {
+      d = `M 10,30 L 290,30 L 300,90 L 0,90 Z`; 
+    }
+    return d;
+  }, [category]);
+
   return (
-    <div className="relative w-full h-32 bg-black/20 rounded-xl border border-white/[0.05] flex items-center justify-center overflow-hidden group">
-      {/* Background grid */}
+    <div className="relative w-full h-44 bg-black/20 rounded-xl border border-white/[0.05] flex flex-col items-center justify-center overflow-hidden group">
       <div className="absolute inset-0" style={{ backgroundImage: 'linear-gradient(rgba(255,255,255,0.03) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,0.03) 1px, transparent 1px)', backgroundSize: '10px 10px' }} />
       
-      <svg viewBox="0 0 100 300" className="h-[120%] text-blue-500/80 drop-shadow-[0_0_8px_rgba(59,130,246,0.5)] transform rotate-90 scale-x-[-1]">
-        <motion.path 
-          d={path}
-          initial={false}
-          animate={{ d: path }}
-          transition={{ type: "spring", stiffness: 100, damping: 15 }}
-          fill="currentColor" 
-          fillOpacity="0.1"
-          stroke="currentColor" 
-          strokeWidth="3"
-          strokeLinejoin="round"
-        />
-        {/* Center line */}
-        <line x1="50" y1="10" x2="50" y2="290" stroke="rgba(255,255,255,0.2)" strokeWidth="1" strokeDasharray="4 4" />
+      <div className="absolute top-2 right-2 z-10 flex gap-1 bg-[#1a1a2e] rounded-md p-1 border border-white/10">
+        <button onClick={() => setView('PLAN')} className={`text-[9px] px-2 py-0.5 rounded ${view==='PLAN'?'bg-blue-500/20 text-blue-400 font-bold':'text-[#555]'}`}>PLAN</button>
+        <button onClick={() => setView('PROFILE')} className={`text-[9px] px-2 py-0.5 rounded ${view==='PROFILE'?'bg-rose-500/20 text-rose-400 font-bold':'text-[#555]'}`}>PROFILE</button>
+      </div>
+
+      <svg viewBox="-20 0 340 100" className={`w-full h-full p-4 transition-colors duration-500 ${view==='PLAN'?'text-blue-500/80 drop-shadow-[0_0_8px_rgba(59,130,246,0.5)]':'text-rose-500/80 drop-shadow-[0_0_8px_rgba(244,63,94,0.5)]'}`}>
+        {view === 'PLAN' && (
+          <>
+            <motion.path 
+              d={planPath}
+              initial={false}
+              animate={{ d: planPath }}
+              transition={{ type: "spring", stiffness: 60, damping: 15 }}
+              fill="currentColor" 
+              fillOpacity="0.1"
+              stroke="currentColor" 
+              strokeWidth="2"
+              strokeLinejoin="round"
+            />
+            <line x1="0" y1="50" x2="300" y2="50" stroke="rgba(255,255,255,0.2)" strokeWidth="1" strokeDasharray="4 4" />
+            {stations && stations.map((st, i) => (
+              <line key={i} x1={(st.pos/dim.L)*300} y1={50 - ((st.halfBreadth / (dim.B / 2)) * 40)} x2={(st.pos/dim.L)*300} y2={50 + ((st.halfBreadth / (dim.B / 2)) * 40)} stroke="rgba(255,255,255,0.05)" strokeWidth="0.5" />
+            ))}
+          </>
+        )}
+        
+        {view === 'PROFILE' && (
+          <>
+            <line x1="-20" y1="70" x2="320" y2="70" stroke="rgba(59,130,246,0.4)" strokeWidth="1" strokeDasharray="2 2" />
+            <text x="-15" y="66" fill="rgba(59,130,246,0.6)" fontSize="6" fontFamily="monospace">WATERLINE</text>
+            <motion.path 
+              d={profilePath}
+              initial={false}
+              animate={{ d: profilePath }}
+              transition={{ type: "spring", stiffness: 60, damping: 15 }}
+              fill="currentColor" 
+              fillOpacity="0.1"
+              stroke="currentColor" 
+              strokeWidth="2"
+              strokeLinejoin="round"
+            />
+          </>
+        )}
       </svg>
       
       <div className="absolute top-2 left-3 flex flex-col">
-        <span className="text-[9px] text-[#888] font-mono tracking-widest uppercase">Plan View</span>
-        <span className="text-xs font-bold text-blue-400">{shapeType} HULL</span>
+        <span className="text-[9px] text-[#888] font-mono tracking-widest uppercase text-left">{view} VIEW</span>
+        <span className="text-xs font-bold text-white text-left">{shapeType} HULL</span>
       </div>
-      <div className="absolute bottom-2 right-3 text-[9px] text-[#555] font-mono">
-        Cb: {VESSEL_FACTORS[category].cb.toFixed(2)}
+      <div className="absolute bottom-2 right-3 text-[9px] text-[#555] font-mono flex flex-col items-end">
+        <span>Cb: {VESSEL_FACTORS[category].cb.toFixed(2)}</span>
+        {dim.L && dim.B && <span>L/B: {(dim.L/dim.B).toFixed(2)}</span>}
       </div>
     </div>
   );
@@ -152,7 +214,7 @@ export default function WorkloadPage() {
               </div>
 
               {/* Interactive Visualizer */}
-              <VesselShapeVisualizer category={category} />
+              <VesselShapeVisualizer category={category} dim={dim} condition={condition} />
 
               <div className="grid grid-cols-3 gap-3">
                 <div>

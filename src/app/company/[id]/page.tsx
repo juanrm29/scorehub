@@ -4,10 +4,10 @@ import { useParams } from 'next/navigation';
 import { motion } from 'framer-motion';
 import Link from 'next/link';
 import { companies } from '@/lib/data';
-import { getCompanyStatus, getCompanyCurrentScore, getCompanyCurrentLevel, getLevelColor, getStatusLabel, getStatusColor, daysSinceLastDeal, yearsUntilLapse } from '@/lib/scoring';
+import { getCompanyStatus, getCompanyCurrentScore, getCompanyCurrentLevel, getLevelColor, getStatusLabel, getStatusColor, daysSinceLastDeal, yearsUntilLapse, generateAIExecutiveSummary, calculateChurnRisk, calculateLTV } from '@/lib/scoring';
 import { ScoreRing } from '@/components/ScoreRing';
 import { LevelBadge } from '@/components/LevelBadge';
-import { ArrowLeft, Building2, MapPin, User, Calendar, Ship, Clock, AlertTriangle, TrendingUp, TrendingDown, Minus, FileText, Download } from 'lucide-react';
+import { ArrowLeft, Building2, MapPin, User, Calendar, Ship, Clock, AlertTriangle, TrendingUp, TrendingDown, Minus, FileText, Download, Sparkles, Activity, Target } from 'lucide-react';
 import { exportCompanyReportPDF, exportAssessmentPDF } from '@/lib/exportPdf';
 import { CompanyStatus, NewAssessment, RepeatedAssessment } from '@/lib/types';
 
@@ -119,6 +119,63 @@ export default function CompanyDetailPage() {
           </motion.div>
         ))}
       </div>
+
+      {/* AI Executive Summary */}
+      <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.15 }} className="rounded-2xl p-6 bg-gradient-to-br from-indigo-500/10 via-purple-500/5 to-transparent border border-indigo-500/20 relative overflow-hidden">
+        <div className="absolute top-0 left-0 w-1 h-full bg-indigo-500" />
+        <h2 className="text-sm font-bold flex items-center gap-2 mb-3 text-indigo-300">
+          <Sparkles className="w-4 h-4" /> AI Executive Summary
+        </h2>
+        <p className="text-sm text-[#ddd] leading-relaxed italic">
+          "{generateAIExecutiveSummary(company)}"
+        </p>
+      </motion.div>
+
+      {/* Predictive Intelligence */}
+      {status === 'ACTIVE_REPEATED' && (
+        <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.2 }} className="grid grid-cols-2 gap-4">
+          <div className="glass-strong rounded-2xl p-5 border border-white/[0.05]">
+            <h2 className="text-sm font-semibold flex items-center gap-2 mb-4">
+              <Activity className="w-4 h-4 text-rose-400" /> Churn Risk Analysis
+            </h2>
+            {(() => {
+              const churn = calculateChurnRisk(company);
+              const color = churn.risk === 'HIGH' ? 'text-red-400' : churn.risk === 'MEDIUM' ? 'text-amber-400' : 'text-emerald-400';
+              return (
+                <div>
+                  <div className="flex items-baseline gap-2 mb-2">
+                    <span className={`text-2xl font-black ${color}`}>{churn.risk}</span>
+                    <span className="text-xs text-[#888]">RISK LEVEL</span>
+                  </div>
+                  <p className="text-xs text-[#aaa]">{churn.message}</p>
+                </div>
+              );
+            })()}
+          </div>
+          <div className="glass-strong rounded-2xl p-5 border border-white/[0.05]">
+            <h2 className="text-sm font-semibold flex items-center gap-2 mb-4">
+              <Target className="w-4 h-4 text-emerald-400" /> Est. Lifetime Value (LTV)
+            </h2>
+            {(() => {
+              const ltv = calculateLTV(company);
+              const trendColor = ltv.potential === 'GROWING' ? 'text-emerald-400' : ltv.potential === 'DECLINING' ? 'text-red-400' : 'text-amber-400';
+              return (
+                <div>
+                  <div className="flex items-baseline gap-2 mb-2">
+                    <span className="text-2xl font-black font-mono text-emerald-300">
+                      Rp {(ltv.ltvValue / 1_000_000_000).toFixed(1)} M
+                    </span>
+                    <span className="text-xs text-[#888]">Est. Potential</span>
+                  </div>
+                  <p className="text-xs text-[#aaa]">
+                    Trend potensi: <span className={`font-semibold ${trendColor}`}>{ltv.potential}</span>
+                  </p>
+                </div>
+              );
+            })()}
+          </div>
+        </motion.div>
+      )}
 
       {/* 3-Year Rule Alert */}
       {status === 'NEW_ONLY' && (

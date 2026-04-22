@@ -1,7 +1,7 @@
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import { Company, NewAssessment, RepeatedAssessment } from './types';
-import { getCompanyStatus, getCompanyCurrentScore, getCompanyCurrentLevel, getStatusLabel, getLevelColor } from './scoring';
+import { getCompanyStatus, getCompanyCurrentScore, getCompanyCurrentLevel, getStatusLabel, getLevelColor, generateAIExecutiveSummary } from './scoring';
 
 // ==================== HELPERS ====================
 function levelLabel(level: string) {
@@ -114,6 +114,24 @@ export function exportCompanyReportPDF(company: Company) {
   });
 
   y = (doc as jsPDF & { lastAutoTable: { finalY: number } }).lastAutoTable.finalY + 10;
+
+  // ---- AI Executive Summary ----
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(10);
+  doc.setTextColor(139, 92, 246);
+  doc.text('AI EXECUTIVE SUMMARY', margin, y);
+  y += 2;
+  doc.setFillColor(139, 92, 246);
+  doc.rect(margin, y, 45, 0.5, 'F');
+  y += 6;
+  
+  doc.setFont('helvetica', 'italic');
+  doc.setFontSize(8);
+  doc.setTextColor(180, 180, 200);
+  const summaryText = generateAIExecutiveSummary(company);
+  const splitText = doc.splitTextToSize(summaryText, contentWidth);
+  doc.text(splitText, margin, y);
+  y += (splitText.length * 4) + 10;
 
   // ---- New Assessments ----
   if (company.newAssessments.length > 0) {

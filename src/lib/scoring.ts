@@ -353,3 +353,102 @@ export function yearsUntilLapse(company: Company): number | null {
   const remaining = THREE_YEARS_MS - elapsed;
   return Math.max(0, remaining / (365.25 * 24 * 60 * 60 * 1000));
 }
+
+// ==================== AI & PREDICTIVE INTELLIGENCE ====================
+
+export function calculateChurnRisk(company: Company): { risk: 'LOW' | 'MEDIUM' | 'HIGH', trend: number, message: string } {
+  if (company.repeatedAssessments.length < 2) {
+    return { risk: 'LOW', trend: 0, message: 'Data historis tidak cukup untuk prediksi Churn.' };
+  }
+  const sorted = [...company.repeatedAssessments].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+  const current = sorted[0].scores;
+  const previous = sorted[1].scores;
+  
+  const scoreTrend = current.totalScore - previous.totalScore;
+  const paymentTrend = current.paymentAvg - previous.paymentAvg;
+  
+  let risk: 'LOW' | 'MEDIUM' | 'HIGH' = 'LOW';
+  let message = 'Risiko Churn rendah. Klien menunjukkan performa stabil atau meningkat.';
+  
+  if (scoreTrend < -0.5 || paymentTrend <= -1.0) {
+    risk = 'HIGH';
+    message = 'Risiko Churn TINGGI! Terjadi penurunan drastis pada skor total atau kualitas pembayaran.';
+  } else if (scoreTrend < -0.2 || paymentTrend < -0.5) {
+    risk = 'MEDIUM';
+    message = 'Risiko Churn Sedang. Perlu perhatian pada penurunan tren pembayaran atau operasional.';
+  }
+  
+  return { risk, trend: scoreTrend, message };
+}
+
+export function calculateLTV(company: Company): { ltvValue: number, potential: 'STAGNANT' | 'GROWING' | 'DECLINING' } {
+  if (company.repeatedAssessments.length === 0) return { ltvValue: 0, potential: 'STAGNANT' };
+  
+  const sorted = [...company.repeatedAssessments].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+  const latest = sorted[0].scores;
+  
+  // Basic LTV formula: Score Kontribusi Omset (1-5) * Score Lama Kerjasama (1-5) * Base Multiplier
+  const baseMultiplier = 500_000_000; // 500 jt IDR base unit for LTV representation
+  const ltvValue = latest.kontribusiOmsetScore * latest.lamaKerjasamaScore * baseMultiplier;
+  
+  let potential: 'STAGNANT' | 'GROWING' | 'DECLINING' = 'STAGNANT';
+  if (sorted.length > 1) {
+    const prev = sorted[1].scores;
+    if (latest.kontribusiOmsetScore > prev.kontribusiOmsetScore) potential = 'GROWING';
+    else if (latest.kontribusiOmsetScore < prev.kontribusiOmsetScore) potential = 'DECLINING';
+  }
+  
+  return { ltvValue, potential };
+}
+
+export function generateAIExecutiveSummary(company: Company): string {
+  const status = getCompanyStatus(company);
+  if (status === 'NEW_ONLY' && company.newAssessments.length > 0) {
+    const latest = [...company.newAssessments].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())[0];
+    const s = latest.scores;
+    
+    const params = [
+      { name: 'Fleet Size', score: s.fleetScore },
+      { name: 'Term Payment', score: s.termPaymentScore },
+      { name: 'Legal Documents', score: s.legalScore },
+      { name: 'Technical Docs', score: s.technicalScore },
+      { name: 'Decision Speed', score: s.decisionSpeedScore }
+    ].sort((a, b) => a.score - b.score);
+    
+    return `Berdasarkan penilaian Pre-Judgement, ${company.companyName} mendapatkan skor awal ${s.totalScore.toFixed(2)} (${getLevel(s.totalScore).replace('_', ' ')}). Kelemahan utama yang perlu dimitigasi sebelum kesepakatan adalah pada aspek ${params[0].name} (Skor: ${params[0].score.toFixed(1)}). Pendekatan komersial harus disesuaikan dengan profil risiko ini.`;
+  }
+  
+  if (company.repeatedAssessments.length > 0) {
+    const sorted = [...company.repeatedAssessments].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+    const latest = sorted[0];
+    const s = latest.scores;
+    
+    let trendMsg = '';
+    if (sorted.length > 1) {
+      const prev = sorted[1].scores;
+      const diff = s.totalScore - prev.totalScore;
+      if (diff > 0.2) trendMsg = `menunjukkan tren peningkatan performa yang positif (+${diff.toFixed(2)}).`;
+      else if (diff < -0.2) trendMsg = `mengalami penurunan performa yang perlu diwaspadai (${diff.toFixed(2)}).`;
+      else trendMsg = `menunjukkan performa yang relatif stabil.`;
+    } else {
+      trendMsg = `telah menyelesaikan penilaian pasca-proyek pertamanya.`;
+    }
+    
+    const params = [
+      { name: 'Ketepatan Bayar', score: s.ketepatanBayarScore },
+      { name: 'Revisi Invoice', score: s.revisiInvoiceScore },
+      { name: 'Konflik QC', score: s.konflikQCScore },
+      { name: 'Komunikasi PIC', score: s.komunikasiScore },
+      { name: 'Kontribusi Omset', score: s.kontribusiOmsetScore },
+      { name: 'Cancel Order', score: s.cancelOrderScore }
+    ].sort((a, b) => a.score - b.score);
+    
+    const weakest = params[0];
+    const strongest = params[params.length - 1];
+    
+    return `Evaluasi terbaru untuk ${company.companyName} ${trendMsg} Klien saat ini berada di level ${getLevel(s.totalScore).replace('_', ' ')}. Kekuatan utama mereka ada pada aspek ${strongest.name} (Skor: ${strongest.score.toFixed(1)}), namun perlu intervensi manajerial segera pada aspek ${weakest.name} yang mencatat skor terendah (${weakest.score.toFixed(1)}). Direkomendasikan evaluasi term pembayaran atau kebijakan pada project berikutnya.`;
+  }
+  
+  return "Belum ada data penilaian yang cukup untuk menghasilkan Executive Summary.";
+}
+
