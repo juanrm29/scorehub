@@ -1,12 +1,12 @@
 @import "tailwindcss";
 
 :root {
-  --bg-primary: #06060b;
-  --bg-secondary: #0c0c14;
-  --bg-card: #12121c;
-  --border: #1e1e30;
-  --text-primary: #eeeef5;
-  --text-secondary: #7878a0;
+  --bg-primary: #040406;
+  --bg-secondary: #0a0a0f;
+  --bg-card: #0f0f15;
+  --border: #1a1a26;
+  --text-primary: #f0f0f5;
+  --text-secondary: #8080a8;
   --accent-blue: #3b82f6;
   --accent-purple: #8b5cf6;
   --accent-emerald: #10b981;
@@ -20,8 +20,12 @@
 body {
   background: var(--bg-primary);
   color: var(--text-primary);
-  font-family: 'Inter', system-ui, -apple-system, sans-serif;
+  font-family: 'Outfit', system-ui, -apple-system, sans-serif;
   overflow-x: hidden;
+}
+
+.font-mono {
+  font-family: 'JetBrains Mono', monospace;
 }
 
 /* ========= AURORA BACKGROUND ========= */
@@ -86,22 +90,23 @@ body {
   background-size: 48px 48px;
 }
 
-/* ========= GLASS MORPHISM 2.0 ========= */
+/* ========= GLASS MORPHISM 3.0 ========= */
 .glass {
-  background: rgba(14, 14, 24, 0.6);
-  backdrop-filter: blur(24px) saturate(120%);
-  border: 1px solid rgba(255, 255, 255, 0.04);
+  background: rgba(10, 10, 15, 0.5);
+  backdrop-filter: blur(24px) saturate(140%);
+  border: 1px solid rgba(255, 255, 255, 0.03);
   transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
 }
 .glass:hover {
-  border-color: rgba(255, 255, 255, 0.07);
-  background: rgba(16, 16, 28, 0.7);
+  border-color: rgba(255, 255, 255, 0.08);
+  background: rgba(12, 12, 18, 0.6);
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
 }
 
 .glass-strong {
-  background: rgba(12, 12, 20, 0.85);
+  background: rgba(6, 6, 10, 0.7);
   backdrop-filter: blur(40px) saturate(150%);
-  border: 1px solid rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.04);
 }
 
 /* ========= GRADIENT BORDER ========= */

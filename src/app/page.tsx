@@ -2,15 +2,19 @@
 
 import Link from 'next/link';
 import { useEffect, useState } from 'react';
+import { motion } from 'framer-motion';
 import { companies } from '@/lib/data';
-import { getCompanyStatus, getCompanyCurrentScore, getCompanyCurrentLevel, getLevelColor, getLevelEmoji, yearsUntilLapse } from '@/lib/scoring';
+import { getCompanyStatus, getCompanyCurrentScore, getCompanyCurrentLevel, getLevelColor, getLevelEmoji, yearsUntilLapse, calculateLTV, calculateChurnRisk } from '@/lib/scoring';
 import { LevelBadge } from '@/components/LevelBadge';
+import { LTVForecastChart } from '@/components/LTVForecastChart';
+import { RiskMatrixChart } from '@/components/RiskMatrixChart';
+import { ChartTooltip } from '@/components/ChartTooltip';
 import { ClientLevel } from '@/lib/types';
 import {
   Users, TrendingUp, AlertTriangle, Sparkles,
   Brain, Target, Zap, Clock, ShieldAlert, BarChart3,
   Activity, Eye, Lightbulb, Minus, TrendingDown,
-  Layers, Globe, Shield, Crown, Rocket,
+  Layers, Globe, Shield, Crown, Rocket, Info,
 } from 'lucide-react';
 
 // ==================== SCORE RING ====================
@@ -118,9 +122,14 @@ function HexStat({ value, label, sub, color, icon: Icon, delay = 0 }: { value: s
     <div className={`relative group transition-all duration-700 ${visible ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-4'}`}>
       <div className="absolute inset-0 rounded-2xl opacity-0 group-hover:opacity-100 transition-opacity duration-500"
         style={{ background: `radial-gradient(ellipse at center, ${color}08, transparent 70%)` }} />
-      <div className="relative glass rounded-2xl p-6 hover:border-[#2a2a3a] transition-all duration-300 overflow-hidden">
-        <div className="absolute top-0 right-0 w-32 h-32 opacity-[0.03] pointer-events-none"
-          style={{ background: `radial-gradient(circle, ${color}, transparent 70%)` }} />
+    <motion.div 
+      initial={{ opacity: 0, y: 20 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ delay: delay / 1000 }}
+      className="relative glass rounded-2xl p-6 hover:border-[#2a2a3a] transition-all duration-300 overflow-hidden card-3d"
+    >
+      <div className="absolute top-0 right-0 w-32 h-32 opacity-[0.03] pointer-events-none"
+        style={{ background: `radial-gradient(circle, ${color}, transparent 70%)` }} />
         <div className="flex items-start justify-between mb-4">
           <div className="w-12 h-12 rounded-2xl flex items-center justify-center relative"
             style={{ background: `linear-gradient(135deg, ${color}15, ${color}05)` }}>
@@ -129,10 +138,10 @@ function HexStat({ value, label, sub, color, icon: Icon, delay = 0 }: { value: s
           </div>
           <div className="w-1.5 h-1.5 rounded-full animate-pulse" style={{ background: color, boxShadow: `0 0 6px ${color}` }} />
         </div>
-        <p className="text-3xl font-black tracking-tight">{value}</p>
-        <p className="text-xs text-[#666] mt-1 font-medium">{label}</p>
-        <p className="text-[10px] text-[#444] mt-0.5">{sub}</p>
-      </div>
+        <p className="text-3xl font-black tracking-tight font-mono text-gradient-gold drop-shadow-md">{value}</p>
+        <p className="text-xs text-[#888] mt-1 font-medium tracking-wide uppercase">{label}</p>
+        <p className="text-[10px] text-[#555] mt-0.5">{sub}</p>
+    </motion.div>
     </div>
   );
 }
@@ -151,11 +160,23 @@ function useAnalytics() {
         c.repeatedAssessments[c.repeatedAssessments.length - 2].scores.totalScore
       : null,
     latestRepScores: c.repeatedAssessments.length > 0 ? c.repeatedAssessments[c.repeatedAssessments.length - 1].scores : null,
+    ltv: calculateLTV(c),
+    churnRisk: calculateChurnRisk(c),
+    zScore: 0,
   }));
 
   const total = enriched.length;
-  const avgScore = enriched.reduce((a, c) => a + c.score, 0) / total;
+  const avgScore = enriched.reduce((a, c) => a + c.score, 0) / (total || 1);
+  const stdDev = Math.sqrt(enriched.reduce((acc, c) => acc + Math.pow(c.score - avgScore, 2), 0) / (total || 1));
+  
+  // Assign Z-Score
+  enriched.forEach(c => {
+    c.zScore = stdDev > 0 ? (c.score - avgScore) / stdDev : 0;
+  });
+
   const totalFleet = enriched.reduce((a, c) => a + c.fleetSize, 0);
+  const totalLTV = enriched.reduce((a, c) => a + c.ltv.ltvValue, 0);
+  const anomalies = enriched.filter(c => c.zScore <= -1.5 || (c.churnRisk.trend < 0 && c.score < 2.5));
 
   const byLevel = { STRATEGIC: 0, PREFERRED: 0, REGULAR: 0, HIGH_RISK: 0 };
   enriched.forEach(c => byLevel[c.level]++);
@@ -211,10 +232,12 @@ function useAnalytics() {
   if (improvingCount > 0) insights.push({ type: 'success', message: `${improvingCount} client menunjukkan tren skor meningkat`, action: 'Pertahankan' });
   if (byLevel.HIGH_RISK > 0) insights.push({ type: 'warning', message: `${byLevel.HIGH_RISK} client dalam kategori HIGH RISK`, action: 'Evaluasi kerjasama' });
 
+  if (anomalies.length > 0) insights.push({ type: 'warning', message: `${anomalies.length} client menunjukkan anomali statistik penurunan ekstrem (Z-Score < -1.5)`, action: 'Investigasi Segera' });
+
   return {
     enriched, total, avgScore, totalFleet, byLevel, byStatus, lapseRisk,
     topPerformers, awaitingFollowUp, scoreRanges, improvingCount, decliningCount,
-    stableCount, byLocation, categoryAvgs, conversionRate, insights,
+    stableCount, byLocation, categoryAvgs, conversionRate, insights, totalLTV, anomalies
   };
 }
 
@@ -240,7 +263,10 @@ export default function Dashboard() {
       <div className="relative z-10 space-y-8">
 
         {/* ====== HERO HEADER ====== */}
-        <div className="relative overflow-hidden rounded-3xl border border-white/[0.04]"
+        <motion.div 
+          initial={{ opacity: 0, scale: 0.98 }}
+          animate={{ opacity: 1, scale: 1 }}
+          className="relative overflow-hidden rounded-3xl border border-white/[0.04] glass-strong"
           style={{ background: 'linear-gradient(135deg, rgba(59,130,246,0.05), rgba(139,92,246,0.05), rgba(16,185,129,0.03))' }}>
           <div className="absolute inset-0 opacity-30"
             style={{ backgroundImage: 'radial-gradient(circle at 20% 50%, rgba(59,130,246,0.08) 0%, transparent 50%), radial-gradient(circle at 80% 20%, rgba(139,92,246,0.08) 0%, transparent 50%)' }} />
@@ -256,9 +282,9 @@ export default function Dashboard() {
                   <span className="text-[11px] text-emerald-400 font-medium">Live</span>
                 </div>
               </div>
-              <h1 className="text-4xl font-black tracking-tight bg-clip-text text-transparent"
-                style={{ backgroundImage: 'linear-gradient(135deg, #f0f0f5 0%, #8888a0 100%)' }}>
-                ScoreHub Analytics
+              <h1 className="text-4xl font-black tracking-tight bg-clip-text text-transparent drop-shadow-sm"
+                style={{ backgroundImage: 'linear-gradient(135deg, #ffffff 0%, #a0a0c0 100%)' }}>
+                SCOREHUB ANALYTICS
               </h1>
               <p className="text-[#555] mt-2 text-sm max-w-md">Maritime client portfolio intelligence — powered by multi-dimensional scoring algorithms</p>
             </div>
@@ -282,8 +308,8 @@ export default function Dashboard() {
                   </div>
                 </div>
                 <div>
-                  <p className="text-[10px] text-[#555] uppercase tracking-wider">Conversion</p>
-                  <p className="text-lg font-black text-purple-400">{a.conversionRate.toFixed(0)}%</p>
+                  <p className="text-[10px] text-[#555] uppercase tracking-wider font-mono">Conversion</p>
+                  <p className="text-lg font-black text-purple-400 font-mono text-gradient">{a.conversionRate.toFixed(0)}%</p>
                 </div>
                 <div className="text-[10px] text-[#444]">
                   Updated {new Date().toLocaleDateString('id-ID', { dateStyle: 'long' })}
@@ -291,7 +317,7 @@ export default function Dashboard() {
               </div>
             </div>
           </div>
-        </div>
+        </motion.div>
 
         {/* ====== KPI CARDS ====== */}
         <div className="grid grid-cols-5 gap-4">
@@ -304,7 +330,10 @@ export default function Dashboard() {
 
         {/* ====== AI INSIGHTS ====== */}
         {a.insights.length > 0 && (
-          <div className="relative overflow-hidden rounded-2xl border border-white/[0.04]"
+          <motion.div 
+            initial={{ opacity: 0, x: -20 }}
+            animate={{ opacity: 1, x: 0 }}
+            className="relative overflow-hidden rounded-2xl border border-white/[0.04] glass"
             style={{ background: 'linear-gradient(135deg, rgba(251,191,36,0.03), rgba(139,92,246,0.03))' }}>
             <div className="absolute top-0 left-0 w-1 h-full bg-gradient-to-b from-amber-500 via-purple-500 to-blue-500" />
             <div className="p-6 pl-8">
@@ -340,8 +369,58 @@ export default function Dashboard() {
                 ))}
               </div>
             </div>
-          </div>
+          </motion.div>
         )}
+
+        {/* ====== ADVANCED DATA SCIENCE ====== */}
+        <div className="grid grid-cols-12 gap-5">
+          {/* LTV Forecast */}
+          <div className="col-span-7 glass-strong rounded-2xl p-6 relative overflow-hidden flex flex-col group">
+            <div className="absolute top-0 right-0 w-64 h-64 opacity-5 pointer-events-none" style={{ background: 'radial-gradient(circle, #10b981, transparent 70%)' }} />
+            <div className="relative z-10 flex-1">
+              <LTVForecastChart currentLTV={a.totalLTV} historicalTrend={5.2} />
+            </div>
+            
+            <div className="absolute top-6 right-6">
+              <ChartTooltip content={
+                <>
+                  <strong className="text-emerald-400 block mb-1">Cara Membaca Grafik:</strong>
+                  Grafik ini memproyeksikan <strong className="text-white">Lifetime Value (LTV)</strong> seluruh klien. Garis naik menunjukkan potensi pertumbuhan pendapatan, sementara area bercahaya adalah akumulasi aset berjalan.
+                </>
+              } />
+            </div>
+            
+            <div className="mt-4 flex items-center justify-between text-xs text-[#666]">
+              <span className="flex items-center gap-1.5"><Activity className="w-3.5 h-3.5 text-emerald-400" /> Algoritma Prediksi Regresi</span>
+              <span>Proyeksi 3-5 Tahun (Asumsi churn rate konstan)</span>
+            </div>
+          </div>
+
+          {/* Risk vs Value Matrix */}
+          <div className="col-span-5 glass rounded-2xl p-6 relative overflow-hidden flex flex-col">
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="text-sm font-bold flex items-center gap-2">
+                <Target className="w-4 h-4 text-amber-400" />The Risk Matrix (Churn vs LTV)
+              </h2>
+              <ChartTooltip content={
+                <>
+                  <strong className="text-amber-400 block mb-1">Cara Membaca Matrix:</strong>
+                  • <strong className="text-red-400">Pojok Kanan Atas (Critical Alert)</strong>: Klien paling berharga tapi paling berisiko kabur.<br/>
+                  • <strong className="text-emerald-400">Pojok Kanan Bawah (Safe VIP)</strong>: Klien paling setia dan menguntungkan.<br/>
+                  • Titik berdenyut (<span className="text-red-400">Ping</span>) menandakan anomali statistik tiba-tiba.
+                </>
+              } />
+            </div>
+            <RiskMatrixChart data={a.enriched.map(c => ({
+              id: c.id,
+              name: c.companyName,
+              ltv: c.ltv.ltvValue,
+              churnProb: c.churnRisk.trend, // Map trend (0-100) as churnProb
+              level: c.level,
+              zScore: c.zScore || 0
+            }))} />
+          </div>
+        </div>
 
         {/* ====== MAIN GRID ====== */}
         <div className="grid grid-cols-12 gap-5">
@@ -349,9 +428,17 @@ export default function Dashboard() {
           <div className="col-span-3 glass rounded-2xl p-6 relative overflow-hidden">
             <div className="absolute bottom-0 left-0 w-full h-32 opacity-5"
               style={{ background: 'linear-gradient(to top, #06b6d4, transparent)' }} />
-            <h2 className="text-sm font-bold mb-5 flex items-center gap-2">
-              <Activity className="w-4 h-4 text-cyan-400" />Client Pipeline
-            </h2>
+            <div className="flex items-center justify-between mb-5">
+              <h2 className="text-sm font-bold flex items-center gap-2">
+                <Activity className="w-4 h-4 text-cyan-400" />Client Pipeline
+              </h2>
+              <ChartTooltip content={
+                <>
+                  <strong className="text-cyan-400 block mb-1">Client Pipeline:</strong>
+                  Menampilkan status pergerakan klien (Pre-judgement, Active, Lapsed) beserta tren kenaikan atau penurunan performa secara keseluruhan.
+                </>
+              } />
+            </div>
             <div className="space-y-4 relative">
               {[
                 { label: 'Pre-judgement', count: a.byStatus.NEW_ONLY, color: '#06b6d4', icon: '🆕' },
@@ -391,9 +478,17 @@ export default function Dashboard() {
           {/* Score Distribution */}
           <div className="col-span-5 glass rounded-2xl p-6 relative overflow-hidden">
             <div className="absolute top-0 right-0 w-40 h-40 opacity-5" style={{ background: 'radial-gradient(circle, #3b82f6, transparent 70%)' }} />
-            <h2 className="text-sm font-bold mb-5 flex items-center gap-2">
-              <BarChart3 className="w-4 h-4 text-blue-400" />Score Distribution
-            </h2>
+            <div className="flex items-center justify-between mb-5">
+              <h2 className="text-sm font-bold flex items-center gap-2">
+                <BarChart3 className="w-4 h-4 text-blue-400" />Score Distribution
+              </h2>
+              <ChartTooltip content={
+                <>
+                  <strong className="text-blue-400 block mb-1">Score Distribution:</strong>
+                  Distribusi skor klien dalam portofolio Anda. Semakin banyak histogram yang condong ke kanan (hijau/biru), semakin sehat portofolio Anda.
+                </>
+              } />
+            </div>
             <div className="flex items-end gap-3 h-36 mb-3">
               {a.scoreRanges.map((r, i) => {
                 const maxCount = Math.max(...a.scoreRanges.map(sr => sr.count), 1);
@@ -440,9 +535,17 @@ export default function Dashboard() {
           {/* Radar */}
           <div className="col-span-4 glass rounded-2xl p-6 relative overflow-hidden">
             <div className="absolute bottom-0 right-0 w-48 h-48 opacity-5" style={{ background: 'radial-gradient(circle, #8b5cf6, transparent 70%)' }} />
-            <h2 className="text-sm font-bold mb-5 flex items-center gap-2">
-              <Layers className="w-4 h-4 text-purple-400" />Portfolio Strength
-            </h2>
+            <div className="flex items-center justify-between mb-5">
+              <h2 className="text-sm font-bold flex items-center gap-2">
+                <Layers className="w-4 h-4 text-purple-400" />Portfolio Strength
+              </h2>
+              <ChartTooltip content={
+                <>
+                  <strong className="text-purple-400 block mb-1">Portfolio Strength:</strong>
+                  Radar chart rata-rata kekuatan armada klien berdasarkan kategori operasional, finansial, dan komunikasi.
+                </>
+              } />
+            </div>
             {a.categoryAvgs ? (
               <>
                 <RadarChartV2 data={a.categoryAvgs} />
@@ -474,10 +577,18 @@ export default function Dashboard() {
           {/* Lapse Risk */}
           <div className="glass rounded-2xl p-6 relative overflow-hidden">
             <div className="absolute top-0 left-0 w-full h-px bg-gradient-to-r from-transparent via-red-500/30 to-transparent" />
-            <h2 className="text-sm font-bold mb-5 flex items-center gap-2">
-              <Shield className="w-4 h-4 text-red-400" />Lapse Risk Alert
-              {a.lapseRisk.length > 0 && <span className="ml-auto text-xs px-2.5 py-1 rounded-full bg-red-500/10 text-red-400 font-bold border border-red-500/20">{a.lapseRisk.length}</span>}
-            </h2>
+            <div className="flex items-center justify-between mb-5">
+              <h2 className="text-sm font-bold flex items-center gap-2">
+                <Shield className="w-4 h-4 text-red-400" />Lapse Risk Alert
+                {a.lapseRisk.length > 0 && <span className="ml-auto text-xs px-2.5 py-1 rounded-full bg-red-500/10 text-red-400 font-bold border border-red-500/20">{a.lapseRisk.length}</span>}
+              </h2>
+              <ChartTooltip content={
+                <>
+                  <strong className="text-red-400 block mb-1">Lapse Risk Alert:</strong>
+                  Daftar klien yang masa aktif penilaiannya hampir melewati batas kedaluwarsa 3 tahun. Hubungi segera untuk *re-assessment*.
+                </>
+              } />
+            </div>
             {a.lapseRisk.length > 0 ? (
               <div className="space-y-2">
                 {a.lapseRisk.map(c => (
@@ -516,9 +627,17 @@ export default function Dashboard() {
           {/* Top Performers */}
           <div className="glass rounded-2xl p-6 relative overflow-hidden">
             <div className="absolute top-0 left-0 w-full h-px bg-gradient-to-r from-transparent via-amber-500/30 to-transparent" />
-            <h2 className="text-sm font-bold mb-5 flex items-center gap-2">
-              <Crown className="w-4 h-4 text-amber-400" />Top Performing Clients
-            </h2>
+            <div className="flex items-center justify-between mb-5">
+              <h2 className="text-sm font-bold flex items-center gap-2">
+                <Crown className="w-4 h-4 text-amber-400" />Top Performing Clients
+              </h2>
+              <ChartTooltip content={
+                <>
+                  <strong className="text-amber-400 block mb-1">Top Performing Clients:</strong>
+                  Peringkat klien aktif dengan skor paling tinggi. Sangat direkomendasikan untuk diberikan prioritas layanan (VIP).
+                </>
+              } />
+            </div>
             <div className="space-y-2">
               {a.topPerformers.map((c, i) => (
                 <Link key={c.id} href={`/company/${c.id}`} className="flex items-center gap-3 rounded-xl border border-white/[0.04] p-3.5 hover:border-white/[0.08] hover:bg-white/[0.01] transition-all group">
@@ -542,10 +661,18 @@ export default function Dashboard() {
           {/* Awaiting Follow-up */}
           <div className="glass rounded-2xl p-6 relative overflow-hidden">
             <div className="absolute top-0 left-0 w-full h-px bg-gradient-to-r from-transparent via-cyan-500/30 to-transparent" />
-            <h2 className="text-sm font-bold mb-5 flex items-center gap-2">
-              <Rocket className="w-4 h-4 text-cyan-400" />Awaiting Follow-up
-              <span className="ml-auto text-xs px-2.5 py-1 rounded-full bg-cyan-500/10 text-cyan-400 font-bold border border-cyan-500/20">{a.awaitingFollowUp.length}</span>
-            </h2>
+            <div className="flex items-center justify-between mb-5">
+              <h2 className="text-sm font-bold flex items-center gap-2">
+                <Rocket className="w-4 h-4 text-cyan-400" />Awaiting Follow-up
+                <span className="ml-auto text-xs px-2.5 py-1 rounded-full bg-cyan-500/10 text-cyan-400 font-bold border border-cyan-500/20">{a.awaitingFollowUp.length}</span>
+              </h2>
+              <ChartTooltip content={
+                <>
+                  <strong className="text-cyan-400 block mb-1">Awaiting Follow-up:</strong>
+                  Klien yang baru dinilai satu kali (Pre-judgement) dan belum memiliki sejarah penilaian berkelanjutan.
+                </>
+              } />
+            </div>
             <div className="space-y-2">
               {a.awaitingFollowUp.slice(0, 6).map(c => (
                 <Link key={c.id} href={`/company/${c.id}`} className="flex items-center gap-3 rounded-xl border border-white/[0.04] p-3.5 hover:border-cyan-500/15 hover:bg-cyan-500/[0.02] transition-all group">
@@ -568,9 +695,17 @@ export default function Dashboard() {
         <div className="grid grid-cols-12 gap-5">
           <div className="col-span-8 glass rounded-2xl p-6 relative overflow-hidden">
             <div className="absolute top-0 left-0 w-full h-px bg-gradient-to-r from-transparent via-emerald-500/30 to-transparent" />
-            <h2 className="text-sm font-bold mb-5 flex items-center gap-2">
-              <Globe className="w-4 h-4 text-emerald-400" />Geographic Portfolio
-            </h2>
+            <div className="flex items-center justify-between mb-5">
+              <h2 className="text-sm font-bold flex items-center gap-2">
+                <Globe className="w-4 h-4 text-emerald-400" />Geographic Portfolio
+              </h2>
+              <ChartTooltip content={
+                <>
+                  <strong className="text-emerald-400 block mb-1">Geographic Portfolio:</strong>
+                  Perbandingan rata-rata skor performa berdasarkan lokasi operasional (*base*) klien.
+                </>
+              } />
+            </div>
             <div className="grid grid-cols-3 gap-3">
               {Object.entries(a.byLocation).sort((x, y) => y[1].count - x[1].count).map(([loc, data]) => {
                 const color = data.avgScore >= 4 ? '#10b981' : data.avgScore >= 3 ? '#3b82f6' : '#f59e0b';
@@ -594,9 +729,17 @@ export default function Dashboard() {
 
           <div className="col-span-4 glass rounded-2xl p-6 relative overflow-hidden">
             <div className="absolute top-0 left-0 w-full h-px bg-gradient-to-r from-transparent via-amber-500/20 to-transparent" />
-            <h2 className="text-sm font-bold mb-5 flex items-center gap-2">
-              <Sparkles className="w-4 h-4 text-amber-400" />Scoring Levels
-            </h2>
+            <div className="flex items-center justify-between mb-5">
+              <h2 className="text-sm font-bold flex items-center gap-2">
+                <Sparkles className="w-4 h-4 text-amber-400" />Scoring Levels
+              </h2>
+              <ChartTooltip content={
+                <>
+                  <strong className="text-amber-400 block mb-1">Scoring Levels:</strong>
+                  Klasifikasi level klien berdasarkan perhitungan akhir skor ScoreHub. Menentukan perlakuan strategi bisnis Anda terhadap mereka.
+                </>
+              } />
+            </div>
             <div className="space-y-3">
               {[
                 { level: 'STRATEGIC', range: '> 4.00', desc: 'VIP treatment', color: '#10b981', emoji: '🏆' },
