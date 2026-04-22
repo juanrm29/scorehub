@@ -8,7 +8,7 @@ import { getCompanyStatus, getCompanyCurrentScore, getCompanyCurrentLevel, getLe
 import {
   Search, Command, CornerDownLeft, ArrowUp, ArrowDown,
   Building2, FileText, LayoutDashboard, Calculator, Database,
-  SlidersHorizontal, BarChart3, X, Sparkles, Hash,
+  SlidersHorizontal, BarChart3, X, Sparkles, Hash, Anchor,
 } from 'lucide-react';
 import { ClientLevel } from '@/lib/types';
 
@@ -37,6 +37,7 @@ function buildSearchIndex(): SearchResult[] {
     { title: 'Scoring View', subtitle: 'All scores & project list', href: '/scoring', icon: BarChart3, color: '#06b6d4' },
     { title: 'Data Master', subtitle: 'Company database', href: '/data-master', icon: Database, color: '#10b981' },
     { title: 'Parameter', subtitle: 'Scoring parameter reference', href: '/parameter', icon: SlidersHorizontal, color: '#f59e0b' },
+    { title: 'Workload Calculator', subtitle: 'Naval architecture estimation engine', href: '/workload', icon: Anchor, color: '#f43f5e' },
   ];
   pages.forEach(p => results.push({ id: `page-${p.href}`, type: 'page', ...p, tags: [] }));
 

@@ -16,6 +16,7 @@ const navItems = [
   { href: '/compare', label: 'Compare', icon: GitCompareArrows, color: '#ec4899' },
   { href: '/data-master', label: 'Data Master', icon: Database, color: '#10b981' },
   { href: '/parameter', label: 'Parameter', icon: SlidersHorizontal, color: '#f59e0b' },
+  { href: '/workload', label: 'Workload Calculator', icon: Anchor, color: '#f43f5e' },
 ];
 
 export function Sidebar() {
