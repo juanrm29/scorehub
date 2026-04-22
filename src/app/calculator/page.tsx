@@ -261,7 +261,20 @@ export default function CalculatorPage() {
               <Save className="w-3.5 h-3.5" /> Project / Assessment Info
             </h3>
             <div className="grid grid-cols-2 gap-3">
-              <div><label className="block text-xs text-[#666] mb-1">Project Name *</label><input type="text" value={projectName} onChange={e => setProjectName(e.target.value)} placeholder="Docking TB. XXX 01" /></div>
+              <div className="relative">
+                <label className="block text-xs text-[#666] mb-1">Project Name *</label>
+                <input type="text" list={tab === 'repeated' ? "existing-projects" : undefined} value={projectName} onChange={e => setProjectName(e.target.value)} placeholder="Docking TB. XXX 01" />
+                {tab === 'repeated' && matchedCompany && (
+                  <datalist id="existing-projects">
+                    {Array.from(new Set([
+                      ...matchedCompany.newAssessments.map(a => a.projectName),
+                      ...matchedCompany.repeatedAssessments.map(a => a.projectName)
+                    ])).map(name => (
+                      <option key={name} value={name} />
+                    ))}
+                  </datalist>
+                )}
+              </div>
               <div><label className="block text-xs text-[#666] mb-1">Assessment Date *</label><input type="date" value={assessmentDate} onChange={e => setAssessmentDate(e.target.value)} /></div>
             </div>
             {tab === 'repeated' && (
