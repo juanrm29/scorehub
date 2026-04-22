@@ -111,6 +111,32 @@ function isReferral(val: any): boolean {
   return s !== '-' && s !== '' && s !== 'tidak' && s !== 'no' && s !== '0';
 }
 
+// ─── Helper: convert any cell value to ISO date string (YYYY-MM-DD) ───────────
+function toISODate(val: any): string | null {
+  if (val === undefined || val === null || val === '') return null;
+  try {
+    // JS Date object (from cellDates:true)
+    if (val instanceof Date) {
+      if (isNaN(val.getTime())) return null;
+      return val.toISOString().split('T')[0];
+    }
+    // Excel serial number
+    if (typeof val === 'number' && val > 1000) {
+      const epoch = new Date(Date.UTC(1899, 11, 30));
+      const d = new Date(epoch.getTime() + val * 86400000);
+      return d.toISOString().split('T')[0];
+    }
+    // String: try Indonesian then generic
+    if (typeof val === 'string') {
+      const id = parseIndonesianDate(val);
+      if (id) return `${id.getFullYear()}-${String(id.getMonth()+1).padStart(2,'0')}-${String(id.getDate()).padStart(2,'0')}`;
+      const d = new Date(val);
+      if (!isNaN(d.getTime())) return d.toISOString().split('T')[0];
+    }
+  } catch { /* ignore */ }
+  return null;
+}
+
 // ─── Main process ─────────────────────────────────────────────────────────────
 export function ExcelImporter({ onImportComplete }: ExcelImporterProps) {
   const [isOpen, setIsOpen] = useState(false);
@@ -131,6 +157,8 @@ export function ExcelImporter({ onImportComplete }: ExcelImporterProps) {
       let success = 0;
       let failed = 0;
       const notes: string[] = [];
+      // Track earliest actual arrival per company (for registeredDate + lamaKerjasama)
+      const earliestArrivalPerCompany = new Map<string, string>();
 
       for (const sheetName of workbook.SheetNames) {
         const sheet = workbook.Sheets[sheetName];
@@ -239,9 +267,29 @@ export function ExcelImporter({ onImportComplete }: ExcelImporterProps) {
             const referralVal = getVal(row, COL.referral);
             const hasReferral = isReferral(referralVal);
 
+            // ── ACTUAL ARRIVAL DATE (used as assessment date + registered date) ─
+            const actualArrivalRaw = getVal(row, COL.actualArrival);
+            const planArrivalRaw = getVal(row, COL.planArrival);
+            const actualArrivalISO = toISODate(actualArrivalRaw) || toISODate(planArrivalRaw);
+            const finishISO = toISODate(getVal(row, COL.finish)) || toISODate(getVal(row, COL.turunDock));
+            const assessmentDate = actualArrivalISO ? `${actualArrivalISO}T00:00:00.000Z` : new Date().toISOString();
+
+            // Track earliest arrival per company for registeredDate & lamaKerjasama
+            const companyKey = companyName.toLowerCase();
+            if (actualArrivalISO) {
+              const prev = earliestArrivalPerCompany.get(companyKey);
+              if (!prev || actualArrivalISO < prev) {
+                earliestArrivalPerCompany.set(companyKey, actualArrivalISO);
+              }
+            }
+
             // ── FIND OR CREATE COMPANY ────────────────────────────────────────
             let existing = getCompanies().find(c => c.companyName.toLowerCase() === companyName.toLowerCase());
             if (!existing) {
+              // registeredDate = first actual arrival date for this company
+              const registeredDate = earliestArrivalPerCompany.get(companyKey)
+                ? `${earliestArrivalPerCompany.get(companyKey)}T00:00:00.000Z`
+                : assessmentDate;
               existing = addCompany({
                 companyName,
                 contactPerson,
@@ -250,7 +298,7 @@ export function ExcelImporter({ onImportComplete }: ExcelImporterProps) {
                 location,
                 fleetSize,
                 industry: 'Maritime',
-                registeredDate: new Date().toISOString(),
+                registeredDate,
               });
             } else {
               // Update fleet size if bigger
@@ -263,8 +311,11 @@ export function ExcelImporter({ onImportComplete }: ExcelImporterProps) {
 
             // ── PROJECT INFO ──────────────────────────────────────────────────
             const projectName = String(getVal(row, COL.projectName) || `Project ${sheetName}`);
-            const periode = String(getVal(row, COL.periode) || sheetName);
-            // With raw:false all values come as strings; parseFloat handles both
+            const periodeRaw = String(getVal(row, COL.periode) || sheetName);
+            // Period: use actual arrival → finish dates if available, fallback to periode column
+            const periodStart = actualArrivalISO || periodeRaw;
+            const periodEnd   = finishISO || actualArrivalISO || periodeRaw;
+
             const parseRaw = (val: any): number | undefined => {
               if (val === undefined || val === null || val === '') return undefined;
               const s = String(val).replace(/[,\s]/g, '');
@@ -280,9 +331,17 @@ export function ExcelImporter({ onImportComplete }: ExcelImporterProps) {
 
             // ── SCHEDULE ANALYSIS: Plan vs Actual Arrival ─────────────────────
             // Schedule variance = Actual arrival - Plan arrival (positive = late, negative = early)
-            const planArrivalRaw = getVal(row, COL.planArrival);
-            const actualArrivalRaw = getVal(row, COL.actualArrival);
             const scheduleVariance = diffDays(planArrivalRaw, actualArrivalRaw); // +days = late
+
+            // ── DURATION OVER-RUN: durasiActual - durasiPlan → additional delay ─
+            const durasiPlan   = parseDuration(getVal(row, COL.durasiPlan));
+            const durasiActual = parseDuration(getVal(row, COL.durasiActual));
+            // If schedule variance not available, fall back to duration overrun
+            const effectiveScheduleVar = scheduleVariance ?? (
+              durasiPlan !== undefined && durasiActual !== undefined
+                ? durasiActual - durasiPlan
+                : undefined
+            );
 
             // ── PAYMENT ANALYSIS: Invoice date vs Payment date → keterlambatan ─
             // For each invoice: diff between Invoice date (plan) and Payment date (actual)
@@ -297,41 +356,43 @@ export function ExcelImporter({ onImportComplete }: ExcelImporterProps) {
             const pay3Plan = getVal(row, COL.payment3Plan);
             const pay3Actual = getVal(row, COL.payment3Actual);
 
-            // Calculate payment delays for each invoice
-            const delays: number[] = [];
+            // ── PAYMENT ANALYSIS ──────────────────────────────────────────────
+            // Each invoice: delay = diffDays(payment_plan, payment_actual)
+            // Positive = late, 0 = on-time, negative = early
             const d1 = diffDays(pay1Plan, pay1Actual);
             const d2 = diffDays(pay2Plan, pay2Actual);
             const d3 = diffDays(pay3Plan, pay3Actual);
+            const delays: number[] = [];
             if (d1 !== undefined) delays.push(d1);
             if (d2 !== undefined) delays.push(d2);
             if (d3 !== undefined) delays.push(d3);
+            // Use WORST-CASE (max) delay — most conservative for scoring
+            const worstPaymentDelay = delays.length > 0 ? Math.max(...delays) : undefined;
 
-            // Average payment delay in days
-            const avgPaymentDelay = delays.length > 0 ? Math.round(delays.reduce((a, b) => a + b, 0) / delays.length) : undefined;
-
-            // Count invoice revisions: "No Invoice" contains revision numbers
-            const noInv1 = String(getVal(row, COL.noInvoice1) || '');
-            const noInv2 = String(getVal(row, COL.noInvoice2) || '');
-            const noInv3 = String(getVal(row, COL.noInvoice3) || '');
-            // Count how many revisions were detected (non-empty "No Invoice" fields)
-            let revisiCount = 0;
-            if (noInv1 && noInv1 !== 'deteksi no revisi' && noInv1.trim() !== '') revisiCount++;
-            if (noInv2 && noInv2 !== 'deteksi no revisi' && noInv2.trim() !== '') revisiCount++;
-            if (noInv3 && noInv3 !== 'deteksi no revisi' && noInv3.trim() !== '') revisiCount++;
-
-            // Penagihan count = how many invoices were sent (= how many invoice dates exist)
+            // ── INVOICE / PENAGIHAN COUNT ─────────────────────────────────────
+            // Penagihan = number of invoices actually sent (non-null invoice dates)
             let penagihanCount = 0;
             if (inv1Date) penagihanCount++;
             if (inv2Date) penagihanCount++;
             if (inv3Date) penagihanCount++;
             const penagihanFinal = penagihanCount > 0 ? penagihanCount : undefined;
 
-            // ── DURATION ANALYSIS ─────────────────────────────────────────────
-            const durasiPlan = parseDuration(getVal(row, COL.durasiPlan));
-            const durasiActual = parseDuration(getVal(row, COL.durasiActual));
+            // ── REVISI INVOICE ────────────────────────────────────────────────
+            // Detect revision by: multiple No Invoice entries OR "-revisi" in No Invoice text
+            const noInv1 = String(getVal(row, COL.noInvoice1) || '');
+            const noInv2 = String(getVal(row, COL.noInvoice2) || '');
+            const noInv3 = String(getVal(row, COL.noInvoice3) || '');
+            const hasRevisi = (s: string) => s && s !== 'deteksi no revisi' && s.trim() !== '';
+            // Count non-first-invoice No Invoice entries as revisions
+            let revisiCount = 0;
+            if (hasRevisi(noInv2)) revisiCount++; // 2nd invoice = 1 revision
+            if (hasRevisi(noInv3)) revisiCount++; // 3rd invoice = 2 revisions
+            // Also detect "-revisi" suffix in any No Invoice text
+            [noInv1, noInv2, noInv3].forEach(n => {
+              if (n.toLowerCase().includes('revisi')) revisiCount++;
+            });
 
-            // ── DECISION SPEED: Based on docking start vs approval ─────────────
-            // We'll infer termPayment days from approval type
+            // ── TERM PAYMENT: from Approval Type ─────────────────────────────
             const termPaymentDays = approvalToTermDays(approvalType);
 
             // ─────────────────────────────────────────────────────────────────
@@ -363,7 +424,7 @@ export function ExcelImporter({ onImportComplete }: ExcelImporterProps) {
                 estimatedValue: nilaiProject,
                 termPayment: termPaymentDays,
                 legalDocuments: legalDocs,
-                backgroundMedia: '', // Not tracked in master data
+                backgroundMedia: '',
                 hasReference: hasReferral,
                 technicalDocuments: techDocs,
                 decisionSpeed: undefined,
@@ -371,17 +432,25 @@ export function ExcelImporter({ onImportComplete }: ExcelImporterProps) {
               addNewAssessment(
                 existing.id,
                 projectName,
-                new Date().toISOString(),
+                assessmentDate,  // ← use actual arrival date
                 newInput,
-                `Pre-judgement | Sheet: ${sheetName} | Periode: ${periode}`
+                `Pre-judgement | Sheet: ${sheetName} | Arrival: ${actualArrivalISO ?? periodeRaw}`
               );
               notes.push(`✅ NEW: ${companyName} — ${projectName}`);
             }
 
             // ── REPEATED ASSESSMENT (Lanjutan/Follow-up) ──────────────────────
-            // ALWAYS created for every project row (actual performance data)
-            const earliestDate = new Date(existing.repeatedAssessments[0]?.date || existing.newAssessments[0]?.date || Date.now());
-            const lamaKerjasama = Math.max(1, Math.round((Date.now() - earliestDate.getTime()) / (1000 * 60 * 60 * 24 * 365)));
+            // lamaKerjasama = years from earliest known arrival for this company in this import
+            const earliestKnown = earliestArrivalPerCompany.get(companyKey);
+            let lamaKerjasama = 1;
+            if (earliestKnown && actualArrivalISO) {
+              const diffMs = new Date(actualArrivalISO).getTime() - new Date(earliestKnown).getTime();
+              lamaKerjasama = Math.max(1, Math.round(diffMs / (1000 * 60 * 60 * 24 * 365)));
+            } else {
+              // Fallback: from existing assessments in store
+              const oldest = existing.repeatedAssessments[0]?.date || existing.newAssessments[0]?.date;
+              if (oldest) lamaKerjasama = Math.max(1, Math.round((Date.now() - new Date(oldest).getTime()) / (1000 * 60 * 60 * 24 * 365)));
+            }
 
             const repInput: RepeatedCustomerInput = {
               companyName: existing.companyName,
@@ -391,19 +460,19 @@ export function ExcelImporter({ onImportComplete }: ExcelImporterProps) {
               location: existing.location,
               fleetSize,
               hasReferral,
-              // Revenue Contribution
+              // Revenue
               margin: profitPct,
               kontribusiOmset: omsetPct,
-              // Payment Behaviour (derived from invoice & payment date columns)
-              ketepatanBayarHari: avgPaymentDelay,
+              // Payment (worst-case delay from invoice plan vs actual)
+              ketepatanBayarHari: worstPaymentDelay,
               revisiInvoice: revisiCount > 0 ? revisiCount : undefined,
               penagihanCount: penagihanFinal,
               // Operational
               cancelOrder: undefined,
-              scheduleVariance,
+              scheduleVariance: effectiveScheduleVar,
               konflikQC: undefined,
               intervensi: undefined,
-              // Relationship (manual input needed)
+              // Relationship (manual input later)
               komunikasiPIC: undefined,
               claimCount: undefined,
               // Value Customer
@@ -413,10 +482,10 @@ export function ExcelImporter({ onImportComplete }: ExcelImporterProps) {
             addRepeatedAssessment(
               existing.id,
               projectName,
-              new Date().toISOString(),
-              periode, periode,
+              assessmentDate,           // ← use actual arrival date
+              periodStart, periodEnd,   // ← real project date range
               repInput,
-              `Lanjutan/Follow-up | Sheet: ${sheetName} | Nilai: ${nilaiProject ? `Rp ${Number(nilaiProject).toLocaleString('id-ID')}` : 'N/A'}`
+              `Lanjutan | Sheet: ${sheetName} | Nilai: ${nilaiProject ? `Rp ${Number(nilaiProject).toLocaleString('id-ID')}` : 'N/A'} | Delay: ${worstPaymentDelay ?? '-'}d`
             );
             notes.push(`🔄 REP: ${companyName} — ${projectName}${needsNewAssessment ? ' (+ New)' : ''}`);
 
