@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
-import { getCompanies } from '@/lib/store';
+import { getCompanies, syncFromSheets } from '@/lib/store';
 import { getCompanyStatus, getCompanyCurrentScore, getCompanyCurrentLevel, getLevelColor, getStatusLabel, getStatusColor } from '@/lib/scoring';
 import { Company, CompanyStatus, ClientLevel, NewAssessment, RepeatedAssessment } from '@/lib/types';
 import { LevelBadge } from '@/components/LevelBadge';
@@ -63,7 +63,11 @@ export default function ScoringPage() {
   const [expandedCompany, setExpandedCompany] = useState<string | null>(null);
   const [mounted, setMounted] = useState(false);
 
-  useEffect(() => { setCompanies(getCompanies()); setMounted(true); }, []);
+  useEffect(() => {
+    setCompanies(getCompanies());
+    setMounted(true);
+    syncFromSheets().then(c => setCompanies(c)).catch(() => {});
+  }, []);
 
   if (!mounted) return null;
 

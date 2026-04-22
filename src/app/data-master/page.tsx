@@ -4,12 +4,13 @@ import { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
 import Link from 'next/link';
 import { Company } from '@/lib/types';
-import { getCompanies, deleteCompanies } from '@/lib/store';
+import { getCompanies, syncFromSheets, deleteCompanies } from '@/lib/store';
 import { LevelBadge } from '@/components/LevelBadge';
 import { getCompanyStatus, getCompanyCurrentScore, getCompanyCurrentLevel, getLevelColor, getStatusLabel, getStatusColor } from '@/lib/scoring';
 import { Database, Search, Filter, ChevronDown, Plus, Ship, Building2, ChevronRight, Clock, AlertTriangle, Download, Trash2, X } from 'lucide-react';
 import { exportDataMasterExcel } from '@/lib/exportExcel';
 import { ExcelImporter } from '@/components/ExcelImporter';
+import { SheetsSyncPanel } from '@/components/SheetsSyncPanel';
 
 export default function DataMasterPage() {
   const [search, setSearch] = useState('');
@@ -31,6 +32,7 @@ export default function DataMasterPage() {
 
   useEffect(() => {
     setCompanies(getCompanies());
+    syncFromSheets().then(c => setCompanies(c)).catch(() => {});
   }, []);
 
   const refreshData = () => {
@@ -98,6 +100,9 @@ export default function DataMasterPage() {
           </button>
         </div>
       </motion.div>
+
+      {/* Sheets Sync Panel */}
+      <SheetsSyncPanel />
 
       {/* Status Summary */}
       <div className="grid grid-cols-4 gap-4">

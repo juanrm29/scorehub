@@ -1,40 +1,86 @@
 'use client';
 
+/**
+ * store.ts
+ *
+ * Architecture:
+ *   Google Sheets  = single source of truth (server-side via /api/sheets)
+ *   localStorage   = client-side cache for instant reads
+ *
+ * On first load  : syncFromSheets() → fetches Sheets → stores in localStorage
+ * On every save  : write to localStorage immediately (instant UI),
+ *                  then push to Sheets in background (fire-and-forget)
+ */
+
 import { Company, NewAssessment, RepeatedAssessment } from './types';
-import { companies as staticCompanies } from './data';
 import { calculateNewCustomer, calculateRepeatedCustomer, getCompanyStatus } from './scoring';
 
-const STORAGE_KEY = 'scorehub_companies';
+const STORAGE_KEY = 'scorehub_companies_v2';
 
-// Initialize or get companies
+// ── localStorage helpers ─────────────────────────────────────────────────────
+
 export function getCompanies(): Company[] {
-  if (typeof window === 'undefined') return structuredClone(staticCompanies);
-
+  if (typeof window === 'undefined') return [];
   const stored = localStorage.getItem(STORAGE_KEY);
-  if (!stored) {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(staticCompanies));
-    return structuredClone(staticCompanies);
-  }
-
-  try {
-    return JSON.parse(stored) as Company[];
-  } catch {
-    return structuredClone(staticCompanies);
-  }
+  if (!stored) return [];
+  try { return JSON.parse(stored) as Company[]; } catch { return []; }
 }
 
-function save(companies: Company[]) {
+function saveLocal(companies: Company[]) {
   if (typeof window === 'undefined') return;
   localStorage.setItem(STORAGE_KEY, JSON.stringify(companies));
 }
 
-// Generate unique ID
+// ── Unique ID ────────────────────────────────────────────────────────────────
+
 function uid() {
   return `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 }
 
-// Add a new company
-export function addCompany(company: Omit<Company, 'id' | 'newAssessments' | 'repeatedAssessments' | 'lastDealDate'>): Company {
+// ── Sync: Google Sheets → localStorage ──────────────────────────────────────
+
+/**
+ * Call this once when the app mounts.
+ * Returns the fresh Company[] from Sheets (and caches it).
+ * Falls back to localStorage if Sheets is unreachable.
+ */
+export async function syncFromSheets(): Promise<Company[]> {
+  try {
+    const res = await fetch('/api/sheets', { method: 'GET' });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const data = await res.json();
+    const companies: Company[] = data.companies ?? [];
+    saveLocal(companies);
+    return companies;
+  } catch (e) {
+    console.warn('[store] syncFromSheets failed, using localStorage cache:', e);
+    return getCompanies();
+  }
+}
+
+// ── Push helpers (background, non-blocking) ──────────────────────────────────
+
+async function pushToSheets(action: string, payload: object) {
+  try {
+    const res = await fetch('/api/sheets', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action, ...payload }),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      console.warn(`[store] pushToSheets(${action}) failed:`, err);
+    }
+  } catch (e) {
+    console.warn(`[store] pushToSheets(${action}) network error:`, e);
+  }
+}
+
+// ── Company operations ───────────────────────────────────────────────────────
+
+export function addCompany(
+  company: Omit<Company, 'id' | 'newAssessments' | 'repeatedAssessments' | 'lastDealDate'>
+): Company {
   const all = getCompanies();
   const newCompany: Company = {
     ...company,
@@ -44,11 +90,23 @@ export function addCompany(company: Omit<Company, 'id' | 'newAssessments' | 'rep
     lastDealDate: null,
   };
   all.push(newCompany);
-  save(all);
+  saveLocal(all);
+  // Sync to Sheets in background
+  pushToSheets('save_company', { company: newCompany });
   return newCompany;
 }
 
-// Add a New Customer assessment to a company
+export function updateCompany(id: string, updates: Partial<Omit<Company, 'id' | 'newAssessments' | 'repeatedAssessments'>>) {
+  const all = getCompanies();
+  const idx = all.findIndex(c => c.id === id);
+  if (idx === -1) return;
+  all[idx] = { ...all[idx], ...updates };
+  saveLocal(all);
+  pushToSheets('save_company', { company: all[idx] });
+}
+
+// ── New Assessment ───────────────────────────────────────────────────────────
+
 export function addNewAssessment(
   companyId: string,
   projectName: string,
@@ -70,11 +128,37 @@ export function addNewAssessment(
     notes,
   };
   company.newAssessments.push(assessment);
-  save(all);
+  saveLocal(all);
+
+  // Sync to Sheets in background
+  pushToSheets('save_new', { company, assessment });
+
   return assessment;
 }
 
-// Add a Repeated Customer assessment to a company
+export function updateNewAssessment(
+  companyId: string,
+  assessmentId: string,
+  input: Parameters<typeof calculateNewCustomer>[0],
+  notes?: string,
+): NewAssessment {
+  const all = getCompanies();
+  const company = all.find(c => c.id === companyId);
+  if (!company) throw new Error('Company not found');
+  const idx = company.newAssessments.findIndex(a => a.id === assessmentId);
+  if (idx === -1) throw new Error('Assessment not found');
+
+  const scores = calculateNewCustomer(input);
+  company.newAssessments[idx] = { ...company.newAssessments[idx], input, scores, notes };
+  saveLocal(all);
+
+  pushToSheets('save_new', { company, assessment: company.newAssessments[idx] });
+
+  return company.newAssessments[idx];
+}
+
+// ── Repeated Assessment ──────────────────────────────────────────────────────
+
 export function addRepeatedAssessment(
   companyId: string,
   projectName: string,
@@ -101,30 +185,14 @@ export function addRepeatedAssessment(
   };
   company.repeatedAssessments.push(assessment);
   company.lastDealDate = date;
-  save(all);
+  saveLocal(all);
+
+  // Sync to Sheets in background
+  pushToSheets('save_repeated', { company, assessment });
+
   return assessment;
 }
 
-// Update an existing New Assessment
-export function updateNewAssessment(
-  companyId: string,
-  assessmentId: string,
-  input: Parameters<typeof calculateNewCustomer>[0],
-  notes?: string,
-): NewAssessment {
-  const all = getCompanies();
-  const company = all.find(c => c.id === companyId);
-  if (!company) throw new Error('Company not found');
-  const idx = company.newAssessments.findIndex(a => a.id === assessmentId);
-  if (idx === -1) throw new Error('Assessment not found');
-
-  const scores = calculateNewCustomer(input);
-  company.newAssessments[idx] = { ...company.newAssessments[idx], input, scores, notes };
-  save(all);
-  return company.newAssessments[idx];
-}
-
-// Update an existing Repeated Assessment
 export function updateRepeatedAssessment(
   companyId: string,
   assessmentId: string,
@@ -141,45 +209,45 @@ export function updateRepeatedAssessment(
   if (idx === -1) throw new Error('Assessment not found');
 
   const scores = calculateRepeatedCustomer(input);
-  company.repeatedAssessments[idx] = { ...company.repeatedAssessments[idx], projectName, periodStart, periodEnd, input, scores, notes };
-  save(all);
+  company.repeatedAssessments[idx] = {
+    ...company.repeatedAssessments[idx],
+    projectName, periodStart, periodEnd, input, scores, notes,
+  };
+  saveLocal(all);
+
+  pushToSheets('save_repeated', { company, assessment: company.repeatedAssessments[idx] });
+
   return company.repeatedAssessments[idx];
 }
 
-// Delete a single assessment
+// ── Delete operations ────────────────────────────────────────────────────────
+
 export function deleteAssessment(companyId: string, assessmentId: string, type: 'NEW' | 'REPEATED') {
   const all = getCompanies();
   const company = all.find(c => c.id === companyId);
   if (!company) return;
+
   if (type === 'NEW') {
     company.newAssessments = company.newAssessments.filter(a => a.id !== assessmentId);
   } else {
     company.repeatedAssessments = company.repeatedAssessments.filter(a => a.id !== assessmentId);
-    // Update lastDealDate
-    const sorted = [...company.repeatedAssessments].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+    const sorted = [...company.repeatedAssessments].sort(
+      (a, b) => new Date(b.date).getTime() - new Date(a.date).getTime()
+    );
     company.lastDealDate = sorted[0]?.date ?? null;
   }
-  save(all);
+  saveLocal(all);
+  // Note: deletion from Sheets is a manual action (Sheets row stays as archive).
+  // To fully delete from Sheets, implement a DELETE /api/sheets endpoint.
 }
 
-// Reset to static data
-export function resetData() {
-  if (typeof window !== 'undefined') {
-    localStorage.removeItem(STORAGE_KEY);
-  }
-}
-
-// Delete companies by category or all
 export function deleteCompanies(category: 'ALL' | 'NEW_ONLY' | 'ACTIVE_REPEATED' | 'LAPSED') {
-  if (category === 'ALL') {
-    save([]); // Completely empty
-    return;
-  }
-
+  if (category === 'ALL') { saveLocal([]); return; }
   const all = getCompanies();
-  const filtered = all.filter(c => {
-    const status = getCompanyStatus(c);
-    return status !== category; // keep those that DO NOT match the category
-  });
-  save(filtered);
+  const filtered = all.filter(c => getCompanyStatus(c) !== category);
+  saveLocal(filtered);
+}
+
+export function resetData() {
+  if (typeof window !== 'undefined') localStorage.removeItem(STORAGE_KEY);
 }

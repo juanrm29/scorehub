@@ -3,7 +3,7 @@
 import Link from 'next/link';
 import { useEffect, useState } from 'react';
 import { motion } from 'framer-motion';
-import { getCompanies } from '@/lib/store';
+import { getCompanies, syncFromSheets } from '@/lib/store';
 import { Company } from '@/lib/types';
 import { getCompanyStatus, getCompanyCurrentScore, getCompanyCurrentLevel, getLevelColor, getLevelEmoji, yearsUntilLapse, calculateLTV, calculateChurnRisk } from '@/lib/scoring';
 import { LevelBadge } from '@/components/LevelBadge';
@@ -248,8 +248,10 @@ export default function Dashboard() {
   const [mounted, setMounted] = useState(false);
 
   useEffect(() => {
-    setCompanies(getCompanies());
+    setCompanies(getCompanies()); // instant from cache
     setMounted(true);
+    // Sync from Sheets in background
+    syncFromSheets().then(companies => setCompanies(companies)).catch(() => {});
   }, []);
 
   const a = useAnalytics(companies);

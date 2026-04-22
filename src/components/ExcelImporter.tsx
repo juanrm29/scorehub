@@ -2,7 +2,7 @@
 
 import { useState, useRef } from 'react';
 import * as XLSX from 'xlsx';
-import { Upload, X, CheckCircle2, Loader2, Info, RefreshCw, Cloud } from 'lucide-react';
+import { Upload, X, CheckCircle2, Loader2, Info, Cloud } from 'lucide-react';
 import { Company, RepeatedCustomerInput, NewCustomerInput } from '@/lib/types';
 import { addCompany, addRepeatedAssessment, addNewAssessment, getCompanies } from '@/lib/store';
 
@@ -115,10 +115,8 @@ function isReferral(val: any): boolean {
 export function ExcelImporter({ onImportComplete }: ExcelImporterProps) {
   const [isOpen, setIsOpen] = useState(false);
   const [loading, setLoading] = useState(false);
-  const [syncLoading, setSyncLoading] = useState(false);
   const [result, setResult] = useState<{ success: number; failed: number; notes: string[] } | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const hasGoogleSheets = !!process.env.NEXT_PUBLIC_HAS_GOOGLE_SHEETS;
 
   const processExcel = async (file: File) => {
     setLoading(true);
@@ -432,6 +430,9 @@ export function ExcelImporter({ onImportComplete }: ExcelImporterProps) {
         }
       }
 
+      if (success > 0) {
+        notes.push('☁️ Data otomatis di-sync ke Google Sheets di background.');
+      }
       setResult({ success, failed, notes });
       if (success > 0) onImportComplete();
     } catch (error) {
@@ -443,176 +444,8 @@ export function ExcelImporter({ onImportComplete }: ExcelImporterProps) {
     }
   };
 
-  // ─── Sync from Google Sheets API ──────────────────────────────────────────────
-  const syncFromSheets = async () => {
-    setSyncLoading(true);
-    setResult(null);
-    try {
-      const res = await fetch('/api/sheets');
-      if (!res.ok) {
-        const err = await res.json();
-        throw new Error(err.error ?? `HTTP ${res.status}`);
-      }
-      const data: { sheets: Record<string, string[][]>; fetchedAt: string } = await res.json();
 
-      let success = 0;
-      let failed = 0;
-      const notes: string[] = [`🕐 Fetched at ${new Date(data.fetchedAt).toLocaleString('id-ID')}`];
 
-      for (const [sheetName, rawRows] of Object.entries(data.sheets)) {
-        // Google Sheets API returns all values as strings — convert to same format processExcel uses
-        const rows: any[][] = rawRows.map(row =>
-          row.map(cell => {
-            // Try to detect numbers
-            if (typeof cell === 'string' && cell.trim() !== '') {
-              const n = parseFloat(cell.replace(/,/g, ''));
-              if (!isNaN(n) && String(n) === cell.replace(/,/g, '').trim()) return n;
-            }
-            return cell;
-          })
-        );
-
-        if (rows.length < 3) continue;
-
-        // Find header row
-        let headerRowIdx = 1;
-        for (let i = 0; i < Math.min(5, rows.length); i++) {
-          const rowStr = (rows[i] || []).map(c => String(c || '').toLowerCase()).join('|');
-          if (rowStr.includes('perusahaan client') || rowStr.includes('contact person')) {
-            headerRowIdx = i;
-            break;
-          }
-        }
-
-        const headers = Array.from({ length: (rows[headerRowIdx] || []).length }, (_, i) => {
-          const h = (rows[headerRowIdx] || [])[i];
-          return h != null ? String(h).toLowerCase().trim() : '';
-        });
-
-        const col = (search: string, startFrom = 0): number =>
-          headers.findIndex((h, i) => i >= startFrom && h != null && typeof h === 'string' && h.includes(search.toLowerCase()));
-
-        const COL = {
-          no: col('no'), company: col('perusahaan'), contact: col('contact person'),
-          email: col('email'), phone: col('telp'), location: col('alamat'),
-          legalDocs: col('kelengkapan'), fleet: col('jumlah fleet'), referral: col('referensi'),
-          projectName: col('project name'), techDocs: col('tehnical'), periode: col('periode'),
-          approval: col('approved'), planArrival: col('plan arrival'), actualArrival: col('arrival'),
-          durasiPlan: 24, durasiActual: 25,
-          nilaiProject: col('nilai project'), profit: col('persentasi profit'), omset: col('persentasi omset'),
-          invoice1: col('invoice 1'), noInvoice1: col('no invoice 1'),
-          payment1Plan: 31, payment1Actual: 32,
-          invoice2: col('invoice 2'), noInvoice2: col('no invoice 2'),
-          payment2Plan: 34, payment2Actual: 35,
-          invoice3: col('invoice 3'), noInvoice3: col('no invoice 3'),
-          payment3Plan: 38, payment3Actual: 39,
-        };
-
-        const getVal = (row: any[], idx: number) => {
-          if (idx < 0 || idx >= row.length) return undefined;
-          const v = row[idx];
-          return (v === null || v === undefined || v === '') ? undefined : v;
-        };
-
-        for (let i = headerRowIdx + 2; i < rows.length; i++) {
-          const row = rows[i];
-          if (!row || row.length === 0) continue;
-          const companyRaw = getVal(row, COL.company);
-          if (!companyRaw || ['plan','actual','no','perusahaan client'].includes(String(companyRaw).toLowerCase().trim())) continue;
-          const companyName = String(companyRaw).trim();
-          if (!companyName) continue;
-
-          try {
-            const email = String(getVal(row, COL.email) || '');
-            const phone = String(getVal(row, COL.phone) || '');
-            const location = String(getVal(row, COL.location) || '');
-            const contactPerson = String(getVal(row, COL.contact) || '');
-            const fleetSize = parseFleet(getVal(row, COL.fleet));
-            const hasReferral = isReferral(getVal(row, COL.referral));
-
-            let existing = getCompanies().find(c => c.companyName.toLowerCase() === companyName.toLowerCase());
-            if (!existing) {
-              existing = addCompany({ companyName, contactPerson, email, phone, location, fleetSize, industry: 'Maritime', registeredDate: new Date().toISOString() });
-            }
-
-            const projectName = String(getVal(row, COL.projectName) || `Project ${sheetName}`);
-            const periode = String(getVal(row, COL.periode) || sheetName);
-            const parseRaw = (val: any): number | undefined => {
-              if (val === undefined || val === null || val === '') return undefined;
-              const s = String(val).replace(/[,\s]/g, '');
-              const n = parseFloat(s);
-              return isNaN(n) ? undefined : n;
-            };
-            const nilaiProject = parseRaw(getVal(row, COL.nilaiProject));
-            const profitPct = pct(getVal(row, COL.profit));
-            const omsetPct = pct(getVal(row, COL.omset));
-            const legalDocs = String(getVal(row, COL.legalDocs) || '');
-            const techDocs = String(getVal(row, COL.techDocs) || '');
-            const approvalType = String(getVal(row, COL.approval) || 'Quotation');
-
-            // Dates from Sheets come as strings — diffDays handles string parsing
-            const pay1Plan = getVal(row, COL.payment1Plan), pay1Actual = getVal(row, COL.payment1Actual);
-            const pay2Plan = getVal(row, COL.payment2Plan), pay2Actual = getVal(row, COL.payment2Actual);
-            const pay3Plan = getVal(row, COL.payment3Plan), pay3Actual = getVal(row, COL.payment3Actual);
-            const delays: number[] = [];
-            [diffDays(pay1Plan, pay1Actual), diffDays(pay2Plan, pay2Actual), diffDays(pay3Plan, pay3Actual)]
-              .forEach(d => d !== undefined && delays.push(d));
-            const avgPaymentDelay = delays.length > 0 ? Math.round(delays.reduce((a,b) => a+b, 0) / delays.length) : undefined;
-
-            const scheduleVariance = diffDays(getVal(row, COL.planArrival), getVal(row, COL.actualArrival));
-            const termPaymentDays = approvalToTermDays(approvalType);
-
-            const noInv1 = String(getVal(row, COL.noInvoice1) || '');
-            const noInv2 = String(getVal(row, COL.noInvoice2) || '');
-            const noInv3 = String(getVal(row, COL.noInvoice3) || '');
-            let revisiCount = 0;
-            if (noInv1 && noInv1 !== 'deteksi no revisi' && noInv1.trim()) revisiCount++;
-            if (noInv2 && noInv2 !== 'deteksi no revisi' && noInv2.trim()) revisiCount++;
-            if (noInv3 && noInv3 !== 'deteksi no revisi' && noInv3.trim()) revisiCount++;
-
-            let penagihanCount = 0;
-            if (getVal(row, COL.invoice1)) penagihanCount++;
-            if (getVal(row, COL.invoice2)) penagihanCount++;
-            if (getVal(row, COL.invoice3)) penagihanCount++;
-
-            const THREE_YEARS_MS = 3 * 365.25 * 24 * 60 * 60 * 1000;
-            const hasNoPreviousProjects = existing.newAssessments.length === 0 && existing.repeatedAssessments.length === 0;
-            const lastDealDate = existing.lastDealDate ? new Date(existing.lastDealDate) : null;
-            const isLapsed = lastDealDate ? (Date.now() - lastDealDate.getTime() > THREE_YEARS_MS) : false;
-            const needsNewAssessment = hasNoPreviousProjects || isLapsed;
-
-            if (needsNewAssessment) {
-              addNewAssessment(existing.id, projectName, new Date().toISOString(),
-                { companyName: existing.companyName, contactPerson: existing.contactPerson, email: existing.email, phone: existing.phone, location: existing.location, fleetSize, estimatedValue: nilaiProject, termPayment: termPaymentDays, legalDocuments: legalDocs, backgroundMedia: '', hasReference: hasReferral, technicalDocuments: techDocs, decisionSpeed: undefined },
-                `Pre-judgement | Sheet: ${sheetName} | Sync: ${new Date(data.fetchedAt).toLocaleDateString('id-ID')}`
-              );
-            }
-
-            const earliestDate = new Date(existing.repeatedAssessments[0]?.date || existing.newAssessments[0]?.date || Date.now());
-            const lamaKerjasama = Math.max(1, Math.round((Date.now() - earliestDate.getTime()) / (1000 * 60 * 60 * 24 * 365)));
-            addRepeatedAssessment(existing.id, projectName, new Date().toISOString(), periode, periode,
-              { companyName: existing.companyName, contactPerson: existing.contactPerson, email: existing.email, phone: existing.phone, location: existing.location, fleetSize, hasReferral, margin: profitPct, kontribusiOmset: omsetPct, ketepatanBayarHari: avgPaymentDelay, revisiInvoice: revisiCount > 0 ? revisiCount : undefined, penagihanCount: penagihanCount > 0 ? penagihanCount : undefined, cancelOrder: undefined, scheduleVariance, konflikQC: undefined, intervensi: undefined, komunikasiPIC: undefined, claimCount: undefined, lamaKerjasama },
-              `Lanjutan | Sheet: ${sheetName} | Sync: ${new Date(data.fetchedAt).toLocaleDateString('id-ID')}`
-            );
-            notes.push(`☁️ ${needsNewAssessment ? 'NEW+' : ''}REP: ${companyName} — ${projectName}`);
-            success++;
-          } catch (err) {
-            console.error('Sheets row error:', err);
-            failed++;
-            notes.push(`❌ GAGAL: ${String(companyRaw)}`);
-          }
-        }
-      }
-
-      setResult({ success, failed, notes });
-      if (success > 0) onImportComplete();
-    } catch (error) {
-      const msg = error instanceof Error ? error.message : String(error);
-      setResult({ success: 0, failed: 1, notes: [`❌ Sync Gagal: ${msg}`] });
-    } finally {
-      setSyncLoading(false);
-    }
-  };
 
   return (
     <>
@@ -620,16 +453,10 @@ export function ExcelImporter({ onImportComplete }: ExcelImporterProps) {
         <button onClick={() => setIsOpen(true)} className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-gradient-to-r from-blue-600/20 to-purple-600/20 border border-blue-500/20 text-blue-400 text-sm font-semibold hover:border-blue-500/40 hover:from-blue-600/30 hover:to-purple-600/30 transition-all">
           <Upload className="w-4 h-4" /> Import Excel
         </button>
-        <button
-          onClick={syncFromSheets}
-          disabled={syncLoading}
-          title="Sync otomatis dari Google Sheets"
-          className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-gradient-to-r from-emerald-600/20 to-teal-600/20 border border-emerald-500/20 text-emerald-400 text-sm font-semibold hover:border-emerald-500/40 hover:from-emerald-600/30 hover:to-teal-600/30 transition-all disabled:opacity-50"
-        >
-          {syncLoading
-            ? <><Loader2 className="w-4 h-4 animate-spin" /> Syncing...</>
-            : <><Cloud className="w-4 h-4" /> Sync Sheets</>}
-        </button>
+        <div className="flex items-center gap-1.5 text-[11px] text-[#555] px-3 py-1.5 rounded-xl border border-white/[0.04] bg-white/[0.02]">
+          <Cloud className="w-3 h-3 text-emerald-500/60" />
+          Auto-sync ke Sheets
+        </div>
       </div>
 
       {isOpen && (
@@ -646,15 +473,11 @@ export function ExcelImporter({ onImportComplete }: ExcelImporterProps) {
             </h2>
             <p className="text-sm text-[#888] mb-2">Upload file <strong>CLIENT MASTER DATA.xlsx</strong> atau <span className="text-emerald-400 font-semibold">sync langsung dari Google Sheets</span>.</p>
 
-            {/* Google Sheets sync button */}
-            <button
-              onClick={() => { setIsOpen(false); syncFromSheets(); }}
-              disabled={syncLoading}
-              className="w-full mb-4 py-2.5 rounded-xl bg-gradient-to-r from-emerald-500/10 to-teal-500/10 border border-emerald-500/20 text-emerald-400 text-sm font-semibold flex items-center justify-center gap-2 hover:border-emerald-500/40 transition-all disabled:opacity-50"
-            >
-              {syncLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Cloud className="w-4 h-4" />}
-              ☁️ Sync Otomatis dari Google Sheets
-            </button>
+            {/* Info: auto sync */}
+            <div className="w-full mb-4 py-2.5 px-3 rounded-xl bg-emerald-500/5 border border-emerald-500/15 text-emerald-400 text-xs flex items-center gap-2">
+              <Cloud className="w-4 h-4 shrink-0" />
+              Data akan otomatis di-sync ke Google Sheets setelah import selesai.
+            </div>
 
             {/* Conversion notes */}
             <div className="bg-blue-500/10 border border-blue-500/20 rounded-xl p-3 mb-5 text-xs text-blue-300 space-y-1">

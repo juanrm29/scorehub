@@ -3,7 +3,7 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { useRouter } from 'next/navigation';
 import { motion, AnimatePresence } from 'framer-motion';
-import { getCompanies } from '@/lib/store';
+import { getCompanies, syncFromSheets } from '@/lib/store';
 import { Company } from '@/lib/types';
 import { getCompanyStatus, getCompanyCurrentScore, getCompanyCurrentLevel, getLevelColor, getLevelEmoji } from '@/lib/scoring';
 import {
@@ -140,6 +140,7 @@ export function CommandPalette() {
 
   useEffect(() => {
     setCompanies(getCompanies());
+    syncFromSheets().then(c => setCompanies(c)).catch(() => {});
   }, []);
 
   const index = useMemo(() => buildSearchIndex(companies), [companies]);

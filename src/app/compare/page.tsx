@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useMemo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { getCompanies } from '@/lib/store';
+import { getCompanies, syncFromSheets } from '@/lib/store';
 import { Company } from '@/lib/types';
 import {
   getCompanyStatus, getCompanyCurrentScore, getCompanyCurrentLevel,
@@ -247,6 +247,7 @@ export default function ComparePage() {
   useEffect(() => {
     setAllCompanies(getCompanies());
     setMounted(true);
+    syncFromSheets().then(c => setAllCompanies(c)).catch(() => {});
   }, []);
 
   if (!mounted) return null;

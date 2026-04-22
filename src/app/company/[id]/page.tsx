@@ -4,7 +4,7 @@ import { useParams } from 'next/navigation';
 import { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
 import Link from 'next/link';
-import { getCompanies } from '@/lib/store';
+import { getCompanies, syncFromSheets } from '@/lib/store';
 import { Company } from '@/lib/types';
 import { getCompanyStatus, getCompanyCurrentScore, getCompanyCurrentLevel, getLevelColor, getStatusLabel, getStatusColor, daysSinceLastDeal, yearsUntilLapse, generateAIExecutiveSummary, calculateChurnRisk, calculateLTV } from '@/lib/scoring';
 import { ScoreRing } from '@/components/ScoreRing';
@@ -110,6 +110,7 @@ export default function CompanyDetailPage() {
   useEffect(() => {
     setCompanies(getCompanies());
     setMounted(true);
+    syncFromSheets().then(c => setCompanies(c)).catch(() => {});
   }, []);
 
   if (!mounted) return null;

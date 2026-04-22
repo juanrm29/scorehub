@@ -3,13 +3,12 @@
 import { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { calculateNewCustomer, calculateRepeatedCustomer, getLevelColor, getCompanyStatus, getCompanyCurrentScore } from '@/lib/scoring';
-import { getCompanies, addNewAssessment, addRepeatedAssessment, addCompany } from '@/lib/store';
-import { pushNewAssessmentToSheets, pushRepeatedAssessmentToSheets } from '@/lib/pushToSheets';
+import { getCompanies, syncFromSheets, addNewAssessment, addRepeatedAssessment, addCompany } from '@/lib/store';
 import { NewCustomerInput, RepeatedCustomerInput, KomunikasiLevel, Company } from '@/lib/types';
 import { ScoreRing } from '@/components/ScoreRing';
 import { LevelBadge } from '@/components/LevelBadge';
 import { InfoTooltip } from '@/components/InfoTooltip';
-import { Calculator, Zap, UserPlus, RefreshCw, AlertTriangle, Info, CheckCircle2, Building2, Save, Plus, ArrowRight, Sparkles } from 'lucide-react';
+import { Calculator, Zap, UserPlus, RefreshCw, AlertTriangle, Info, CheckCircle2, Building2, Save, Plus, ArrowRight, Sparkles, CloudOff, Cloud, Loader2 } from 'lucide-react';
 import Link from 'next/link';
 
 type Tab = 'new' | 'repeated';
@@ -75,7 +74,23 @@ export default function CalculatorPage() {
   const [newCompanyIndustry, setNewCompanyIndustry] = useState('Shipping');
 
   const [mounted, setMounted] = useState(false);
-  useEffect(() => { setCompaniesState(getCompanies()); setMounted(true); }, []);
+  const [syncStatus, setSyncStatus] = useState<'idle' | 'syncing' | 'synced' | 'error'>('idle');
+
+  useEffect(() => {
+    // Load from localStorage cache immediately for instant render
+    setCompaniesState(getCompanies());
+    setMounted(true);
+
+    // Then fetch fresh data from Google Sheets in background
+    setSyncStatus('syncing');
+    syncFromSheets()
+      .then(companies => {
+        setCompaniesState(companies);
+        setSyncStatus('synced');
+        setTimeout(() => setSyncStatus('idle'), 3000);
+      })
+      .catch(() => setSyncStatus('error'));
+  }, []);
 
   if (!mounted) return null;
 
@@ -133,23 +148,15 @@ export default function CalculatorPage() {
     try {
       if (tab === 'new') {
         addNewAssessment(targetCompanyId, projectName, assessmentDate, newInput, notes || undefined);
-        // Push to Google Sheets (fire-and-forget)
-        const savedCompany = getCompanies().find(c => c.id === targetCompanyId)!;
-        const savedAssessment = savedCompany?.newAssessments.at(-1);
-        if (savedAssessment) pushNewAssessmentToSheets(savedCompany, savedAssessment);
         setSavedId(targetCompanyId);
       } else {
         if (!periodStart || !periodEnd) { alert('Period start and end are required for Repeated assessment'); return; }
         addRepeatedAssessment(targetCompanyId, projectName, assessmentDate, periodStart, periodEnd, repInput, notes || undefined);
-        // Push to Google Sheets (fire-and-forget)
-        const savedCompany = getCompanies().find(c => c.id === targetCompanyId)!;
-        const savedAssessment = savedCompany?.repeatedAssessments.at(-1);
-        if (savedAssessment) pushRepeatedAssessmentToSheets(savedCompany, savedAssessment);
         setSavedId(targetCompanyId);
       }
       setSaved(true);
       setCompaniesState(getCompanies());
-      
+
       // Select the newly created company so it doesn't get stuck on Add New form
       if (isNewCompany) {
         setIsNewCompany(false);
@@ -168,14 +175,32 @@ export default function CalculatorPage() {
 
       {/* Header */}
       <motion.div initial={{ opacity: 0, y: -20 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.5 }}>
-        <div className="flex items-center gap-2 mb-1">
-          <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-blue-500/20 to-purple-500/20 flex items-center justify-center">
-            <Calculator className="w-4 h-4 text-blue-400" />
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2 mb-1">
+            <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-blue-500/20 to-purple-500/20 flex items-center justify-center">
+              <Calculator className="w-4 h-4 text-blue-400" />
+            </div>
+            <span className="text-xs text-blue-400 font-semibold uppercase tracking-[0.2em]">Scoring Engine</span>
           </div>
-          <span className="text-xs text-blue-400 font-semibold uppercase tracking-[0.2em]">Scoring Engine</span>
+          {/* Sync Status Pill */}
+          <div className={`flex items-center gap-1.5 text-[11px] font-medium px-3 py-1.5 rounded-full border transition-all duration-500 ${
+            syncStatus === 'syncing' ? 'bg-blue-500/10 border-blue-500/30 text-blue-400' :
+            syncStatus === 'synced'  ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400' :
+            syncStatus === 'error'   ? 'bg-red-500/10 border-red-500/30 text-red-400' :
+            'bg-white/5 border-white/10 text-[#555]'
+          }`}>
+            {syncStatus === 'syncing' && <Loader2 className="w-3 h-3 animate-spin" />}
+            {syncStatus === 'synced'  && <Cloud className="w-3 h-3" />}
+            {syncStatus === 'error'   && <CloudOff className="w-3 h-3" />}
+            {syncStatus === 'idle'    && <Cloud className="w-3 h-3" />}
+            {syncStatus === 'syncing' ? 'Syncing from Sheets...' :
+             syncStatus === 'synced'  ? 'Synced with Google Sheets' :
+             syncStatus === 'error'   ? 'Offline — data from cache' :
+             'Google Sheets'}
+          </div>
         </div>
         <h1 className="text-3xl font-black text-gradient">Calculator &amp; Input</h1>
-        <p className="text-[#555] mt-1 text-sm">Calculate and save client assessment scores</p>
+        <p className="text-[#555] mt-1 text-sm">Data tersimpan langsung ke Google Sheets — tidak tergantung browser</p>
       </motion.div>
 
       {/* Company Selector */}
