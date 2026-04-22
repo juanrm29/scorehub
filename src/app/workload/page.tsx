@@ -308,7 +308,7 @@ export default function WorkloadPage() {
                           <Tooltip 
                             contentStyle={{ backgroundColor: '#1a1a2e', borderColor: '#2a2a3a', borderRadius: '8px', fontSize: '12px' }}
                             itemStyle={{ color: '#fff', fontWeight: 'bold' }}
-                            formatter={(value: number) => [`${value.toFixed(2)} m`, 'Full Breadth']}
+                            formatter={(value: any) => [`${Number(value).toFixed(2)} m`, 'Full Breadth']}
                           />
                           <Area type="monotone" dataKey="fullBreadth" stroke="#3b82f6" strokeWidth={2} fillOpacity={1} fill="url(#colorArea)" />
                         </AreaChart>
