@@ -329,19 +329,18 @@ export function ExcelImporter({ onImportComplete }: ExcelImporterProps) {
             const techDocs = String(getVal(row, COL.techDocs) || '');
             const approvalType = String(getVal(row, COL.approval) || 'Quotation');
 
-            // ── SCHEDULE ANALYSIS: Plan vs Actual Arrival ─────────────────────
-            // Schedule variance = Actual arrival - Plan arrival (positive = late, negative = early)
-            const scheduleVariance = diffDays(planArrivalRaw, actualArrivalRaw); // +days = late
-
-            // ── DURATION OVER-RUN: durasiActual - durasiPlan → additional delay ─
+            // ── SCHEDULE ANALYSIS ──────────────────────────────────────────
+            // Priority 1: Duration overrun (actual - plan days) — most meaningful
+            //   because arrivals are often on-time but work runs over
+            // Priority 2: Arrival difference as fallback
+            const scheduleArrivalVar = diffDays(planArrivalRaw, actualArrivalRaw); // +days = late
             const durasiPlan   = parseDuration(getVal(row, COL.durasiPlan));
             const durasiActual = parseDuration(getVal(row, COL.durasiActual));
-            // If schedule variance not available, fall back to duration overrun
-            const effectiveScheduleVar = scheduleVariance ?? (
-              durasiPlan !== undefined && durasiActual !== undefined
-                ? durasiActual - durasiPlan
-                : undefined
-            );
+            const durationOverrun = (durasiPlan !== undefined && durasiActual !== undefined)
+              ? durasiActual - durasiPlan
+              : undefined;
+            // Prioritize duration overrun (the real operational signal)
+            const effectiveScheduleVar = durationOverrun ?? scheduleArrivalVar;
 
             // ── PAYMENT ANALYSIS: Invoice date vs Payment date → keterlambatan ─
             // For each invoice: diff between Invoice date (plan) and Payment date (actual)
@@ -366,34 +365,50 @@ export function ExcelImporter({ onImportComplete }: ExcelImporterProps) {
             if (d1 !== undefined) delays.push(d1);
             if (d2 !== undefined) delays.push(d2);
             if (d3 !== undefined) delays.push(d3);
-            // Use WORST-CASE (max) delay — most conservative for scoring
-            const worstPaymentDelay = delays.length > 0 ? Math.max(...delays) : undefined;
+            // Use WEIGHTED AVERAGE delay — DP (first) matters most
+            // If only 1 invoice, use that. If 2+, weight first invoice 50%, rest split equally.
+            let worstPaymentDelay: number | undefined = undefined;
+            if (delays.length === 1) {
+              worstPaymentDelay = Math.max(0, delays[0]);
+            } else if (delays.length === 2) {
+              worstPaymentDelay = Math.max(0, Math.round(delays[0] * 0.6 + delays[1] * 0.4));
+            } else if (delays.length >= 3) {
+              worstPaymentDelay = Math.max(0, Math.round(delays[0] * 0.5 + delays[1] * 0.3 + delays[2] * 0.2));
+            }
 
             // ── INVOICE / PENAGIHAN COUNT ─────────────────────────────────────
-            // Penagihan = number of invoices actually sent (non-null invoice dates)
+            // Penagihan = number of invoices where payment was LATE (actual > plan)
+            // Having 3 invoices is normal (DP, Termin, Final) — not penagihan
             let penagihanCount = 0;
-            if (inv1Date) penagihanCount++;
-            if (inv2Date) penagihanCount++;
-            if (inv3Date) penagihanCount++;
-            const penagihanFinal = penagihanCount > 0 ? penagihanCount : undefined;
+            if (d1 !== undefined && d1 > 0) penagihanCount++; // Invoice 1 was late
+            if (d2 !== undefined && d2 > 0) penagihanCount++; // Invoice 2 was late
+            if (d3 !== undefined && d3 > 0) penagihanCount++; // Invoice 3 was late
+            // If no payment data at all, leave undefined (skip parameter)
+            const penagihanFinal = delays.length > 0 ? penagihanCount : undefined;
 
             // ── REVISI INVOICE ────────────────────────────────────────────────
-            // Detect revision by: multiple No Invoice entries OR "-revisi" in No Invoice text
+            // Only count explicit "revisi" / "rev" text in invoice numbers
+            // Multiple invoices (DP, Termin, Final) are NORMAL — not revisions
             const noInv1 = String(getVal(row, COL.noInvoice1) || '');
             const noInv2 = String(getVal(row, COL.noInvoice2) || '');
             const noInv3 = String(getVal(row, COL.noInvoice3) || '');
-            const hasRevisi = (s: string) => s && s !== 'deteksi no revisi' && s.trim() !== '';
-            // Count non-first-invoice No Invoice entries as revisions
             let revisiCount = 0;
-            if (hasRevisi(noInv2)) revisiCount++; // 2nd invoice = 1 revision
-            if (hasRevisi(noInv3)) revisiCount++; // 3rd invoice = 2 revisions
-            // Also detect "-revisi" suffix in any No Invoice text
             [noInv1, noInv2, noInv3].forEach(n => {
-              if (n.toLowerCase().includes('revisi')) revisiCount++;
+              if (n.toLowerCase().includes('revisi') || n.toLowerCase().includes('rev.')) revisiCount++;
             });
 
-            // ── TERM PAYMENT: from Approval Type ─────────────────────────────
+            // ── TERM PAYMENT: from Approval Type ─────────────────────────
             const termPaymentDays = approvalToTermDays(approvalType);
+
+            // ── DECISION SPEED DERIVATION ─────────────────────────────────────
+            // Proxy: gap between Actual Arrival and Naik Dock/Start
+            // Shorter gap = client was better prepared = faster "decision"
+            const arrivalToStart = diffDays(actualArrivalRaw, getVal(row, COL.start))
+              ?? diffDays(actualArrivalRaw, getVal(row, COL.naikDock));
+            // Convert gap to "days to decide" (1 = same/next day, etc.)
+            const decisionSpeedDays = arrivalToStart !== undefined && arrivalToStart >= 0
+              ? Math.max(1, arrivalToStart)
+              : undefined;
 
             // ─────────────────────────────────────────────────────────────────
             // BUSINESS LOGIC:
@@ -411,9 +426,23 @@ export function ExcelImporter({ onImportComplete }: ExcelImporterProps) {
             
             const needsNewAssessment = hasNoPreviousProjects || isLapsed;
 
+            // ── DUPLICATE DETECTION ──────────────────────────────────────────
+            // Skip if assessment with same project name + similar date already exists
+            const isDuplicateNew = existing.newAssessments.some(
+              a => a.projectName === projectName && a.date.startsWith(actualArrivalISO || '____')
+            );
+            const isDuplicateRep = existing.repeatedAssessments.some(
+              a => a.projectName === projectName && a.date.startsWith(actualArrivalISO || '____')
+            );
+            if (isDuplicateNew && isDuplicateRep) {
+              notes.push(`⏭️ SKIP (duplikat): ${companyName} — ${projectName}`);
+              success++;
+              continue;
+            }
+
             // ── NEW ASSESSMENT (Pre-judgement) ─────────────────────────────────
             // Created for: first-time client OR lapsed client (re-assessment)
-            if (needsNewAssessment) {
+            if (needsNewAssessment && !isDuplicateNew) {
               const newInput: NewCustomerInput = {
                 companyName: existing.companyName,
                 contactPerson: existing.contactPerson,
@@ -427,7 +456,7 @@ export function ExcelImporter({ onImportComplete }: ExcelImporterProps) {
                 backgroundMedia: '',
                 hasReference: hasReferral,
                 technicalDocuments: techDocs,
-                decisionSpeed: undefined,
+                decisionSpeed: decisionSpeedDays,
               };
               addNewAssessment(
                 existing.id,
@@ -479,16 +508,17 @@ export function ExcelImporter({ onImportComplete }: ExcelImporterProps) {
               lamaKerjasama,
             };
 
-            addRepeatedAssessment(
-              existing.id,
-              projectName,
-              assessmentDate,           // ← use actual arrival date
-              periodStart, periodEnd,   // ← real project date range
-              repInput,
-              `Lanjutan | Sheet: ${sheetName} | Nilai: ${nilaiProject ? `Rp ${Number(nilaiProject).toLocaleString('id-ID')}` : 'N/A'} | Delay: ${worstPaymentDelay ?? '-'}d`
-            );
-            notes.push(`🔄 REP: ${companyName} — ${projectName}${needsNewAssessment ? ' (+ New)' : ''}`);
-
+            if (!isDuplicateRep) {
+              addRepeatedAssessment(
+                existing.id,
+                projectName,
+                assessmentDate,           // ← use actual arrival date
+                periodStart, periodEnd,   // ← real project date range
+                repInput,
+                `Lanjutan | Sheet: ${sheetName} | Nilai: ${nilaiProject ? `Rp ${Number(nilaiProject).toLocaleString('id-ID')}` : 'N/A'} | Delay: ${worstPaymentDelay ?? '-'}d | Durasi: ${durasiPlan ?? '?'}→${durasiActual ?? '?'}d`
+              );
+              notes.push(`🔄 REP: ${companyName} — ${projectName}${needsNewAssessment && !isDuplicateNew ? ' (+ New)' : ''}`);
+            }
 
             success++;
           } catch (err) {
@@ -550,13 +580,14 @@ export function ExcelImporter({ onImportComplete }: ExcelImporterProps) {
 
             {/* Conversion notes */}
             <div className="bg-blue-500/10 border border-blue-500/20 rounded-xl p-3 mb-5 text-xs text-blue-300 space-y-1">
-              <p className="font-semibold flex items-center gap-1.5"><Info className="w-3.5 h-3.5" /> Konversi Otomatis yang Dilakukan:</p>
-              <p>• <strong>Invoice date vs Payment date</strong> → Ketepatan Bayar (hari)</p>
-              <p>• <strong>Plan arrival vs Actual arrival</strong> → Schedule Variance</p>
+              <p className="font-semibold flex items-center gap-1.5"><Info className="w-3.5 h-3.5" /> Konversi Cerdas yang Dilakukan:</p>
+              <p>• <strong>Payment Plan vs Actual</strong> → Ketepatan Bayar (weighted avg hari)</p>
+              <p>• <strong>Invoice terlambat</strong> → Penagihan Count (hanya yang late)</p>
+              <p>• <strong>Durasi Plan vs Actual</strong> → Schedule Variance (overrun hari)</p>
+              <p>• <strong>Arrival → Start gap</strong> → Decision Speed (kesiapan client)</p>
               <p>• <strong>Approved Pekerjaan</strong> (Quotation/PO/SPK/Kontrak) → Term Payment</p>
-              <p>• <strong>Kelengkapan Dokumen</strong> → Legal Score | <strong>Tehnical Documen</strong> → Technical Score</p>
-              <p>• <strong>Persentasi Profit/Omset</strong> (0.35 → 35%) → Revenue Score</p>
-              <p>• <strong>Project Pertama</strong> = New Assessment | <strong>Project Selanjutnya</strong> = Repeated</p>
+              <p>• <strong>Kelengkapan Dokumen</strong> → Legal Score | <strong>Tehnical</strong> → Technical Score</p>
+              <p>• <strong>Profit/Omset</strong> (0.35 → 35%) → Revenue | <strong>Duplikat</strong> → Auto-skip</p>
             </div>
 
             {!result ? (

@@ -50,7 +50,7 @@ export function scoreFleetSize(fleet: number): number {
 }
 
 export function scoreEstimatedValue(value: number): number {
-  // Value in IDR per vessel
+  // Value in IDR per project
   if (value > 3_000_000_000) return 5;
   if (value >= 2_000_000_000) return 4;
   if (value >= 1_000_000_000) return 3;
@@ -59,10 +59,25 @@ export function scoreEstimatedValue(value: number): number {
 }
 
 export function scoreTermPayment(days: number): number {
+  // days = expected total days until full payment from project start
+  // 5: Kontrak langsung / DP besar → payment selesai ≤14 hari
+  // 4: SPK/PO dengan termin → ≤30 hari
+  // 3: Quotation basis → ≤45 hari  
+  // 2: Termin panjang → ≤60 hari
+  // 1: Tanpa jaminan / >60 hari
   if (days <= 14) return 5;
   if (days <= 30) return 4;
   if (days <= 45) return 3;
   if (days <= 60) return 2;
+  return 1;
+}
+
+export function scoreDecisionSpeed(days: number): number {
+  // days = how many days the client takes to make a decision after quotation
+  if (days <= 2) return 5;
+  if (days <= 5) return 4;
+  if (days <= 7) return 3;
+  if (days <= 14) return 2;
   return 1;
 }
 
@@ -105,18 +120,20 @@ export function calculateNewCustomer(input: NewCustomerInput): NewCustomerScores
   const commercialPotentialWeighted = commercialPotentialAvg * 0.5;
 
   // Credibility (30%)
+  // referenceScore INCLUDED — having a reference from known network is a strong credibility signal
   const legalScore = input.legalDocuments != null ? scoreLegalDocuments(input.legalDocuments) : undefined;
   const backgroundScore = input.backgroundMedia != null ? scoreBackgroundMedia(input.backgroundMedia) : undefined;
   const referenceScore = input.hasReference != null ? (input.hasReference ? 5 : 2) : undefined;
   const credibilityAvg = calcDynamicAverage([
-    { score: legalScore, weight: 50 },
-    { score: backgroundScore, weight: 50 }
+    { score: legalScore, weight: 40 },
+    { score: backgroundScore, weight: 30 },
+    { score: referenceScore, weight: 30 }
   ]);
   const credibilityWeighted = credibilityAvg * 0.3;
 
   // Technical Clarity (20%)
   const technicalScore = input.technicalDocuments != null ? scoreTechnicalDocuments(input.technicalDocuments) : undefined;
-  const decisionSpeedScore = input.decisionSpeed != null ? clamp(input.decisionSpeed, 1, 5) : undefined;
+  const decisionSpeedScore = input.decisionSpeed != null ? scoreDecisionSpeed(input.decisionSpeed) : undefined;
   const technicalClarityAvg = calcDynamicAverage([
     { score: technicalScore, weight: 50 },
     { score: decisionSpeedScore, weight: 50 }
@@ -133,16 +150,16 @@ export function calculateNewCustomer(input: NewCustomerInput): NewCustomerScores
   const level = getLevel(totalScore);
 
   return {
-    fleetScore: fleetScore || 0, 
-    valueScore: valueScore || 0, 
-    termPaymentScore: termPaymentScore || 0, 
+    fleetScore: fleetScore ?? 0, 
+    valueScore: valueScore ?? 0, 
+    termPaymentScore: termPaymentScore ?? 0, 
     commercialPotentialAvg, commercialPotentialWeighted,
-    legalScore: legalScore || 0, 
-    backgroundScore: backgroundScore || 0, 
-    referenceScore: referenceScore || 0, 
+    legalScore: legalScore ?? 0, 
+    backgroundScore: backgroundScore ?? 0, 
+    referenceScore: referenceScore ?? 0, 
     credibilityAvg, credibilityWeighted,
-    technicalScore: technicalScore || 0, 
-    decisionSpeedScore: decisionSpeedScore || 0, 
+    technicalScore: technicalScore ?? 0, 
+    decisionSpeedScore: decisionSpeedScore ?? 0, 
     technicalClarityAvg, technicalClarityWeighted,
     totalScore, level,
   };
@@ -190,10 +207,11 @@ export function scorePenagihan(count: number): number {
 }
 
 export function scoreCancelOrder(count: number): number {
-  if (count <= 1) return 5;
-  if (count === 2) return 4;
-  if (count === 3) return 3;
-  if (count === 4) return 2;
+  // 0 = never cancelled (best), 1 = once, etc.
+  if (count === 0) return 5;
+  if (count === 1) return 4;
+  if (count === 2) return 3;
+  if (count === 3) return 2;
   return 1;
 }
 
@@ -336,24 +354,24 @@ export function calculateRepeatedCustomer(input: RepeatedCustomerInput): Repeate
   const level = getLevel(totalScore);
 
   return {
-    kontribusiOmsetScore: kontribusiOmsetScore || 0, 
-    marginScore: marginScore || 0, 
+    kontribusiOmsetScore: kontribusiOmsetScore ?? 0, 
+    marginScore: marginScore ?? 0, 
     revenueAvg, revenueWeighted,
-    ketepatanBayarScore: ketepatanBayarScore || 0, 
-    revisiInvoiceScore: revisiInvoiceScore || 0, 
-    penagihanScore: penagihanScore || 0, 
+    ketepatanBayarScore: ketepatanBayarScore ?? 0, 
+    revisiInvoiceScore: revisiInvoiceScore ?? 0, 
+    penagihanScore: penagihanScore ?? 0, 
     paymentAvg, paymentWeighted,
-    cancelOrderScore: cancelOrderScore || 0, 
-    scheduleVarianceScore: scheduleVarianceScore || 0, 
-    konflikQCScore: konflikQCScore || 0, 
-    intervensiScore: intervensiScore || 0, 
+    cancelOrderScore: cancelOrderScore ?? 0, 
+    scheduleVarianceScore: scheduleVarianceScore ?? 0, 
+    konflikQCScore: konflikQCScore ?? 0, 
+    intervensiScore: intervensiScore ?? 0, 
     operationalAvg, operationalWeighted,
-    komunikasiScore: komunikasiScore || 0, 
-    claimScore: claimScore || 0, 
+    komunikasiScore: komunikasiScore ?? 0, 
+    claimScore: claimScore ?? 0, 
     relationshipAvg, relationshipWeighted,
-    lamaKerjasamaScore: lamaKerjasamaScore || 0, 
-    fleetScore: fleetScore || 0, 
-    referralScore: referralScore || 0, 
+    lamaKerjasamaScore: lamaKerjasamaScore ?? 0, 
+    fleetScore: fleetScore ?? 0, 
+    referralScore: referralScore ?? 0, 
     valueAvg, valueWeighted,
     totalScore, level,
   };
@@ -362,7 +380,7 @@ export function calculateRepeatedCustomer(input: RepeatedCustomerInput): Repeate
 // ==================== DEFAULT WEIGHTS ====================
 export const NEW_CUSTOMER_WEIGHTS = [
   { category: 'Commercial Potential', weight: 50, formula: 'Estimasi Nilai (40%) + Fleet Size (20%) + Term Payment (40%)' },
-  { category: 'Credibility', weight: 30, formula: 'Legal Perusahaan (50%) + Background Media (50%)' },
+  { category: 'Credibility', weight: 30, formula: 'Legal Docs (40%) + Background Media (30%) + Reference (30%)' },
   { category: 'Clarity of Technical Info', weight: 20, formula: 'Dokumen Teknis (50%) + Decision Speed (50%)' },
 ];
 
@@ -374,11 +392,16 @@ export const REPEATED_CUSTOMER_WEIGHTS = [
   { category: 'Value Customer', weight: 10, formula: 'Lama Kerjasama (40%) + Fleet Size (40%) + Referral (20%)' },
 ];
 
+// Thresholds match getLevel() exactly:
+// STRATEGIC: score > 4.00  (4.01 – 5.00)
+// PREFERRED: score >= 3.00 (3.00 – 4.00)
+// REGULAR:   score >= 2.00 (2.00 – 2.99)
+// HIGH_RISK: score < 2.00  (0.00 – 1.99)
 export const LEVEL_THRESHOLDS = [
-  { level: 'STRATEGIC' as ClientLevel, min: 4.01, max: 5, description: 'Client prioritas utama', color: '#10b981' },
-  { level: 'PREFERRED' as ClientLevel, min: 3, max: 4, description: 'Client dengan potensi baik', color: '#3b82f6' },
-  { level: 'REGULAR' as ClientLevel, min: 2, max: 2.99, description: 'Client standar', color: '#f59e0b' },
-  { level: 'HIGH_RISK' as ClientLevel, min: 0, max: 1.99, description: 'Client berisiko tinggi', color: '#ef4444' },
+  { level: 'STRATEGIC' as ClientLevel, min: 4.01, max: 5.00, description: 'Client prioritas utama — diutamakan dalam resource & pricing', color: '#10b981' },
+  { level: 'PREFERRED' as ClientLevel, min: 3.00, max: 4.00, description: 'Client berpotensi baik — monitor untuk upgrade', color: '#3b82f6' },
+  { level: 'REGULAR' as ClientLevel, min: 2.00, max: 2.99, description: 'Client standar — perlu perhatian lebih', color: '#f59e0b' },
+  { level: 'HIGH_RISK' as ClientLevel, min: 0.00, max: 1.99, description: 'Client berisiko tinggi — evaluasi kelanjutan kerjasama', color: '#ef4444' },
 ];
 
 // ==================== COMPANY HELPERS ====================

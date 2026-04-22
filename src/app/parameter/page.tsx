@@ -157,8 +157,13 @@ export default function ParameterPage() {
             <h3 className="text-xs font-bold text-blue-400 uppercase tracking-wider mb-3">New Customer Formulas</h3>
             {[
               { name: 'Fleet Size', formula: 'IF(Fleet>20→5, ≥15→4, ≥10→3, ≥5→2, else→1)' },
+              { name: 'Est. Value (IDR)', formula: 'IF(>3M→5, ≥2M→4, ≥1M→3, ≥500jt→2, else→1)' },
+              { name: 'Term Payment', formula: 'IF(≤14hari→5, ≤30→4, ≤45→3, ≤60→2, else→1)' },
+              { name: 'Decision Speed', formula: 'IF(≤2hari→5, ≤5→4, ≤7→3, ≤14→2, else→1)' },
               { name: 'Legal Docs', formula: 'Count docs: ≥5→5, ≥4→4, ≥3→3, ≥2→2, else→1' },
               { name: 'Technical Docs', formula: 'Count docs: ≥3→5, ≥2→4, ≥1→3, else→1' },
+              { name: 'Background Media', formula: 'Count: ≥3→5, ≥2→4, ≥1→3, else→1' },
+              { name: 'Reference', formula: 'IF(ada→5, tidak→2)' },
             ].map(f => (
               <div key={f.name} className="flex items-start gap-3">
                 <span className="w-1.5 h-1.5 rounded-full bg-blue-500 mt-1.5 shrink-0" />
@@ -179,7 +184,7 @@ export default function ParameterPage() {
               { name: 'Ketepatan Bayar', formula: 'IF(0 hari→5, ≤7→4, ≤14→3, ≤21→2, else→1)' },
               { name: 'Revisi Invoice', formula: 'IF(0→5, ≤2→4, ≤4→3, ≤6→2, else→1)' },
               { name: 'Penagihan', formula: 'IF(1x→5, 2x→4, 3x→3, 4x→2, else→1)' },
-              { name: 'Cancel Order', formula: 'IF(≤1→5, 2→4, 3→3, 4→2, else→1)' },
+              { name: 'Cancel Order', formula: 'IF(0→5, 1→4, 2→3, 3→2, else→1)' },
               { name: 'Schedule Var.', formula: 'IF(≤-3→5, <0→4, =0→3, ≤3→2, else→1)' },
               { name: 'Konflik QC', formula: 'IF(0→5, 1→4, 2→3, 3→2, else→1)' },
               { name: 'Komunikasi PIC', formula: 'SB→5, B→4, C→3, K→2, SK→1' },

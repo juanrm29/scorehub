@@ -156,10 +156,10 @@ export function EditAssessmentModal({ companyId, assessment, type, onClose, onSa
               <Field label="Term Payment (hari)">
                 <select value={newTerm} onChange={e => setNewTerm(e.target.value)} className="w-full bg-[#0d0d1a] border border-[#2a2a3a] rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-blue-500/50">
                   <option value="">— Pilih —</option>
-                  <option value="14">≤14 hari (Skor 5 — Kontrak)</option>
-                  <option value="30">≤30 hari (Skor 4 — SPK/PO)</option>
-                  <option value="45">≤45 hari (Skor 3 — Quotation)</option>
-                  <option value="60">≤60 hari (Skor 2)</option>
+                  <option value="14">≤14 hari (Skor 5 — Kontrak/DP besar)</option>
+                  <option value="30">≤30 hari (Skor 4 — SPK/PO termin)</option>
+                  <option value="45">≤45 hari (Skor 3 — Quotation basis)</option>
+                  <option value="60">≤60 hari (Skor 2 — Termin panjang)</option>
                   <option value="90">›60 hari (Skor 1)</option>
                 </select>
               </Field>
@@ -186,7 +186,7 @@ export function EditAssessmentModal({ companyId, assessment, type, onClose, onSa
               <Field label="Technical Documents">
                 <Input value={newTech} onChange={setNewTech} placeholder="Ship part, Surat laut, Repair list" />
               </Field>
-              <Field label="Decision Speed (hari)">
+              <Field label="Kecepatan Keputusan (hari)">
                 <select value={newDecision} onChange={e => setNewDecision(e.target.value)} className="w-full bg-[#0d0d1a] border border-[#2a2a3a] rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-blue-500/50">
                   <option value="">— Pilih —</option>
                   <option value="1">{'<2 hari (Skor 5)'}</option>
