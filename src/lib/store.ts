@@ -243,7 +243,13 @@ export function deleteAssessment(companyId: string, assessmentId: string, type: 
     method: 'DELETE',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ action: 'delete_assessment', assessmentId, type }),
-  }).catch(e => console.warn('[store] deleteAssessment Sheets error:', e));
+  })
+    .then(async res => {
+      const data = await res.json();
+      if (!res.ok) console.error('[store] deleteAssessment Sheets FAILED:', data);
+      else console.log('[store] deleteAssessment Sheets OK:', data);
+    })
+    .catch(e => console.error('[store] deleteAssessment network error:', e));
 }
 
 export function deleteCompanies(category: 'ALL' | 'NEW_ONLY' | 'ACTIVE_REPEATED' | 'LAPSED') {
@@ -265,7 +271,13 @@ export function deleteCompanies(category: 'ALL' | 'NEW_ONLY' | 'ACTIVE_REPEATED'
       method: 'DELETE',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ action: 'delete_company', companyId }),
-    }).catch(e => console.warn('[store] deleteCompany Sheets error:', companyId, e));
+    })
+      .then(async res => {
+        const data = await res.json();
+        if (!res.ok) console.error('[store] deleteCompany Sheets FAILED:', companyId, data);
+        else console.log('[store] deleteCompany Sheets OK:', companyId, data);
+      })
+      .catch(e => console.error('[store] deleteCompany network error:', companyId, e));
   });
 }
 
