@@ -8,6 +8,9 @@
  *   • saveNewAssessment()      – append / update a NEW_ASSESSMENTS row
  *   • saveRepeatedAssessment() – append / update a REPEATED_ASSESSMENTS row
  *   • loadAllData()            – read all three tabs → Company[]
+ *   • deleteCompanyRow()       – hard delete company + all its assessments
+ *   • deleteAssessmentRow()    – hard delete one assessment row
+ *   • deleteAllByStatus()      – hard delete multiple companies by status
  */
 
 import {
@@ -423,3 +426,81 @@ export async function loadAllData(): Promise<Company[]> {
 
   return Array.from(companyMap.values());
 }
+
+// ── Hard Delete Helpers ──────────────────────────────────────────────────────
+
+/**
+ * Get the internal sheetId for a named sheet tab.
+ */
+async function getSheetId(sheetName: string): Promise<number> {
+  const sheets = getSheetsClient();
+  const meta = await sheets.spreadsheets.get({ spreadsheetId: SPREADSHEET_ID });
+  const found = meta.data.sheets?.find(s => s.properties?.title === sheetName);
+  if (!found?.properties?.sheetId) throw new Error(`Sheet not found: ${sheetName}`);
+  return found.properties.sheetId;
+}
+
+/**
+ * Delete a single row by ID from any sheet.
+ * Finds the row where col A === id, then issues a DeleteDimensionRequest.
+ */
+async function deleteRowById(sheetName: string, id: string): Promise<boolean> {
+  const sheets = getSheetsClient();
+  const rows = await fetchSheetRows(sheetName);
+  // data rows start at index 1 (index 0 is header)
+  const idx = rows.findIndex((r, i) => i > 0 && r[0] === id);
+  if (idx === -1) return false; // not found
+
+  const sheetId = await getSheetId(sheetName);
+  // Sheets row index is 0-based. idx is 0-based within our array = row idx in sheet.
+  await sheets.spreadsheets.batchUpdate({
+    spreadsheetId: SPREADSHEET_ID,
+    requestBody: {
+      requests: [{
+        deleteDimension: {
+          range: {
+            sheetId,
+            dimension: 'ROWS',
+            startIndex: idx,      // 0-based, inclusive
+            endIndex:   idx + 1,  // 0-based, exclusive
+          },
+        },
+      }],
+    },
+  });
+  return true;
+}
+
+/**
+ * Hard delete one assessment row (NEW or REPEATED).
+ */
+export async function deleteAssessmentRow(
+  assessmentId: string,
+  type: 'NEW' | 'REPEATED',
+): Promise<void> {
+  const sheet = type === 'NEW' ? NEW_SHEET : REPEATED_SHEET;
+  await deleteRowById(sheet, assessmentId);
+}
+
+/**
+ * Hard delete a company row AND all its assessment rows.
+ */
+export async function deleteCompanyRow(companyId: string): Promise<void> {
+  // Fetch assessment rows first, collect IDs belonging to this company
+  const [newRows, repRows] = await Promise.all([
+    fetchSheetRows(NEW_SHEET),
+    fetchSheetRows(REPEATED_SHEET),
+  ]);
+
+  const newIds  = newRows.filter((r, i) => i > 0 && r[1] === companyId).map(r => r[0]);
+  const repIds  = repRows.filter((r, i) => i > 0 && r[1] === companyId).map(r => r[0]);
+
+  // Delete assessments first (rows above company don't shift company row)
+  // Process in reverse order so row indices don't shift during batch
+  for (const id of newIds) await deleteRowById(NEW_SHEET, id);
+  for (const id of repIds) await deleteRowById(REPEATED_SHEET, id);
+
+  // Delete company row
+  await deleteRowById(COMPANIES_SHEET, companyId);
+}
+

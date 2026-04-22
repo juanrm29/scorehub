@@ -237,15 +237,36 @@ export function deleteAssessment(companyId: string, assessmentId: string, type: 
     company.lastDealDate = sorted[0]?.date ?? null;
   }
   saveLocal(all);
-  // Note: deletion from Sheets is a manual action (Sheets row stays as archive).
-  // To fully delete from Sheets, implement a DELETE /api/sheets endpoint.
+
+  // Hard delete from Google Sheets in background
+  fetch('/api/sheets', {
+    method: 'DELETE',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ action: 'delete_assessment', assessmentId, type }),
+  }).catch(e => console.warn('[store] deleteAssessment Sheets error:', e));
 }
 
 export function deleteCompanies(category: 'ALL' | 'NEW_ONLY' | 'ACTIVE_REPEATED' | 'LAPSED') {
-  if (category === 'ALL') { saveLocal([]); return; }
   const all = getCompanies();
-  const filtered = all.filter(c => getCompanyStatus(c) !== category);
-  saveLocal(filtered);
+
+  let toDelete: string[];
+  if (category === 'ALL') {
+    toDelete = all.map(c => c.id);
+    saveLocal([]);
+  } else {
+    const removed = all.filter(c => getCompanyStatus(c) === category);
+    toDelete = removed.map(c => c.id);
+    saveLocal(all.filter(c => getCompanyStatus(c) !== category));
+  }
+
+  // Hard delete each company (+ its assessments) from Google Sheets in background
+  toDelete.forEach(companyId => {
+    fetch('/api/sheets', {
+      method: 'DELETE',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'delete_company', companyId }),
+    }).catch(e => console.warn('[store] deleteCompany Sheets error:', companyId, e));
+  });
 }
 
 export function resetData() {

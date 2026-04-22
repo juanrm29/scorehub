@@ -3,12 +3,17 @@
  *
  * GET  /api/sheets          → load all data → Company[]
  * POST /api/sheets          → save company / assessment to Sheets
+ * DELETE /api/sheets        → hard delete company or assessment from Sheets
  *
  * POST body shapes:
  *   { action: 'init' }                               – ensure tabs + headers
  *   { action: 'save_company',  company }             – upsert company row
  *   { action: 'save_new',      company, assessment } – upsert new assessment
  *   { action: 'save_repeated', company, assessment } – upsert repeated assessment
+ *
+ * DELETE body shapes:
+ *   { action: 'delete_assessment', assessmentId, type: 'NEW' | 'REPEATED' }
+ *   { action: 'delete_company',    companyId }
  */
 
 import { NextRequest, NextResponse } from 'next/server';
@@ -18,6 +23,8 @@ import {
   saveNewAssessment,
   saveRepeatedAssessment,
   loadAllData,
+  deleteAssessmentRow,
+  deleteCompanyRow,
 } from '@/lib/sheetsDb';
 import { Company, NewAssessment, RepeatedAssessment } from '@/lib/types';
 
@@ -85,6 +92,37 @@ export async function POST(req: NextRequest) {
   } catch (error) {
     const msg = error instanceof Error ? error.message : String(error);
     console.error('POST /api/sheets error:', msg);
+    return NextResponse.json({ error: msg }, { status: 500 });
+  }
+}
+
+// ── DELETE: hard delete a row from Sheets ──────────────────────────────────────
+
+export async function DELETE(req: NextRequest) {
+  try {
+    const body = await req.json();
+    const { action } = body as { action: string };
+
+    if (action === 'delete_assessment') {
+      const { assessmentId, type } = body as { assessmentId: string; type: 'NEW' | 'REPEATED' };
+      if (!assessmentId || !type)
+        return NextResponse.json({ error: 'Missing assessmentId or type' }, { status: 400 });
+      await deleteAssessmentRow(assessmentId, type);
+      return NextResponse.json({ ok: true, action, assessmentId });
+    }
+
+    if (action === 'delete_company') {
+      const { companyId } = body as { companyId: string };
+      if (!companyId)
+        return NextResponse.json({ error: 'Missing companyId' }, { status: 400 });
+      await deleteCompanyRow(companyId);
+      return NextResponse.json({ ok: true, action, companyId });
+    }
+
+    return NextResponse.json({ error: `Unknown action: ${action}` }, { status: 400 });
+  } catch (error) {
+    const msg = error instanceof Error ? error.message : String(error);
+    console.error('DELETE /api/sheets error:', msg);
     return NextResponse.json({ error: msg }, { status: 500 });
   }
 }
