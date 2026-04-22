@@ -31,107 +31,224 @@ function CardValue({ label, value, unit, color, subtitle }: { label: string; val
 }
 
 function VesselShapeVisualizer({ category, dim, condition }: { category: VesselCategory, dim: InputDimensions, condition: VesselCondition }) {
-  const shapeType = VESSEL_FACTORS[category].shape.type;
   const [view, setView] = useState<'PLAN' | 'PROFILE'>('PLAN');
-  
-  const stations = useMemo(() => {
-    try {
-      if (!dim.L || !dim.B || !dim.D || dim.L <= 0 || dim.B <= 0 || dim.D <= 0) return null;
-      return calculateWorkload(category, condition, dim, { mh: 0, material: 0, coating: 0, disposal: 0 }).stations;
-    } catch {
-      return null;
-    }
-  }, [category, dim, condition]);
+  const factors = VESSEL_FACTORS[category];
+  const { shape, cb, draftRatio } = factors;
+  const condColor = condition === 'Baik' ? '#10b981' : condition === 'Sedang' ? '#f59e0b' : condition === 'Buruk' ? '#f97316' : '#ef4444';
 
-  const planPath = useMemo(() => {
-    if (!stations || stations.length === 0) return 'M 0,50 L 300,50 Z';
-    
-    const ptsUpper = stations.map(st => {
-      const x = (st.pos / dim.L) * 300;
-      const y = 50 - ((st.halfBreadth / (dim.B / 2)) * 40);
-      return `${x},${y}`;
-    });
-    const ptsLower = [...stations].reverse().map(st => {
-      const x = (st.pos / dim.L) * 300;
-      const y = 50 + ((st.halfBreadth / (dim.B / 2)) * 40);
-      return `${x},${y}`;
-    });
-    
-    return `M ${ptsUpper.join(' L ')} L ${ptsLower.join(' L ')} Z`;
-  }, [stations, dim]);
+  const W = 300, H = 110; // SVG viewport
+  const L = dim.L || 72;
+  const B = dim.B || 18;
+  const D = dim.D || 4.9;
+  const T = D * draftRatio; // draft
 
-  const profilePath = useMemo(() => {
-    const shapeType = VESSEL_FACTORS[category].shape.type;
-    
-    // x=0 is stern, x=300 is bow. Deck y=30, Keel y=90
-    let d = `M 0,30 L 300,30 L 300,90 L 0,90 Z`; 
-    
-    if (shapeType === 'ROUNDED' || shapeType === 'SLENDER') {
-      d = `M 0,30 L 300,30 L 270,90 L 20,90 Q 0,90 0,60 Z`;
-    } else if (shapeType === 'STANDARD' || shapeType === 'FULL') {
-      d = `M 0,30 L 300,30 L 280,90 L 10,90 Z`;
-    } else if (shapeType === 'FLAT' || shapeType === 'BOXY') {
-      d = `M 10,30 L 290,30 L 300,90 L 0,90 Z`; 
+  // ── PLAN VIEW paths (top-down, centerline horizontal) ──────────────────────
+  // All shapes fit in viewBox 0 0 300 110, centered at y=55
+  // x: 0=stern, 300=bow; y: 55=centerline, 55±halfB scaled
+
+  const getPlanPath = (): string => {
+    const cy = 55; // centerline
+    const maxHB = 45; // max half-breadth in SVG units
+    const bFactor = Math.min(1, (B / L) * 6); // scale halfbreadth to look correct
+
+    // Control half-breadth at bow/mid/stern from shape params
+    const hbStern = maxHB * shape.stern * bFactor;
+    const hbMid = maxHB * shape.mid * bFactor;
+    const hbBow = maxHB * shape.bow * bFactor;
+
+    switch (shape.type) {
+      case 'BOXY': // Barge/LCT: near-rectangular, blunt ends
+        return `M 10,${cy - hbStern * 0.9} 
+          C 0,${cy - hbStern * 0.9} 0,${cy + hbStern * 0.9} 10,${cy + hbStern * 0.9}
+          L 280,${cy + hbMid}
+          C 295,${cy + hbBow * 0.5} 300,${cy} 300,${cy}
+          C 300,${cy} 295,${cy - hbBow * 0.5} 280,${cy - hbMid}
+          Z`;
+      case 'FLAT': // LCT: flat bow ramp
+        return `M 5,${cy - hbStern} 
+          L 0,${cy - hbStern}  L 0,${cy + hbStern}  L 5,${cy + hbStern}
+          L 275,${cy + hbMid}
+          L 300,${cy + hbBow * 0.3}  L 300,${cy - hbBow * 0.3}
+          L 275,${cy - hbMid}
+          Z`;
+      case 'FULL': // Tanker/Bulk: very full, parallel midbody
+        return `M 20,${cy - hbStern}
+          C 5,${cy - hbStern} 0,${cy - hbStern * 0.8} 0,${cy}
+          C 0,${cy + hbStern * 0.8} 5,${cy + hbStern} 20,${cy + hbStern}
+          L 250,${cy + hbMid}
+          C 270,${cy + hbMid} 290,${cy + hbBow * 0.6} 300,${cy}
+          C 290,${cy - hbBow * 0.6} 270,${cy - hbMid} 250,${cy - hbMid}
+          Z`;
+      case 'ROUNDED': // Tugboat/Fishing: compact, round
+        return `M 40,${cy - hbStern}
+          C 15,${cy - hbStern} 0,${cy - hbStern * 0.7} 0,${cy}
+          C 0,${cy + hbStern * 0.7} 15,${cy + hbStern} 40,${cy + hbStern}
+          L 200,${cy + hbMid}
+          C 240,${cy + hbMid} 280,${cy + hbBow * 0.5} 300,${cy}
+          C 280,${cy - hbBow * 0.5} 240,${cy - hbMid} 200,${cy - hbMid}
+          Z`;
+      case 'SLENDER': // Passenger: slim, sharp ends
+        return `M 50,${cy - hbStern * 0.6}
+          C 20,${cy - hbStern * 0.6} 5,${cy - hbStern * 0.3} 0,${cy}
+          C 5,${cy + hbStern * 0.3} 20,${cy + hbStern * 0.6} 50,${cy + hbStern * 0.6}
+          L 220,${cy + hbMid}
+          C 260,${cy + hbMid * 0.8} 290,${cy + hbBow * 0.3} 300,${cy}
+          C 290,${cy - hbBow * 0.3} 260,${cy - hbMid * 0.8} 220,${cy - hbMid}
+          Z`;
+      default: // STANDARD: moderate ends
+        return `M 30,${cy - hbStern}
+          C 8,${cy - hbStern} 0,${cy - hbStern * 0.6} 0,${cy}
+          C 0,${cy + hbStern * 0.6} 8,${cy + hbStern} 30,${cy + hbStern}
+          L 230,${cy + hbMid}
+          C 265,${cy + hbMid * 0.7} 292,${cy + hbBow * 0.4} 300,${cy}
+          C 292,${cy - hbBow * 0.4} 265,${cy - hbMid * 0.7} 230,${cy - hbMid}
+          Z`;
     }
-    return d;
-  }, [category]);
+  };
+
+  // ── PROFILE VIEW paths (side elevation) ────────────────────────────────────
+  // x: 0=stern, 300=bow; deck at y=20, keel at y=90
+  // Waterline at y = 90 - (T/D)*(90-20) = 90 - draftRatio*70
+
+  const getProfilePath = (): string => {
+    const keel = 90, deck = 20;
+    const wl = keel - draftRatio * (keel - deck); // waterline y
+    const deckH = deck; // deck top
+    const midDeck = (deck + keel) / 2;
+
+    switch (shape.type) {
+      case 'BOXY': // Barge: flat bottom, square ends, low freeboard
+        return `M 0,${deckH + 5} L 5,${deckH} L 295,${deckH} L 300,${deckH + 5}
+          L 300,${keel} L 0,${keel} Z`;
+      case 'FLAT': // LCT: bow ramp slopes down to waterline
+        return `M 0,${deckH + 5} L 5,${deckH} L 285,${deckH}
+          L 300,${wl + 2} L 300,${keel} L 0,${keel} Z`;
+      case 'FULL': // Tanker: nearly box-shaped, gentle flare
+        return `M 0,${deckH + 8} C 0,${deckH + 3} 5,${deckH} 15,${deckH}
+          L 285,${deckH} C 295,${deckH} 300,${deckH + 5} 300,${deckH + 15}
+          L 300,${keel - 3} C 300,${keel} 297,${keel} 290,${keel}
+          L 10,${keel} C 3,${keel} 0,${keel} 0,${keel - 5} Z`;
+      case 'ROUNDED': // Tugboat: low stern, raised bow, curved keel
+        return `M 0,${deckH + 18} C 0,${deckH + 10} 5,${deckH + 4} 20,${deckH}
+          C 80,${deckH - 4} 180,${deckH - 4} 260,${deckH}
+          C 285,${deckH + 2} 300,${deckH + 8} 300,${deckH + 16}
+          L 300,${keel - 12} C 298,${keel - 4} 290,${keel} 275,${keel}
+          L 25,${keel} C 10,${keel} 0,${keel - 4} 0,${keel - 12} Z`;
+      case 'SLENDER': // Passenger: high deck, sharp bow, elegant stern
+        return `M 0,${deckH + 12} C 0,${deckH + 6} 5,${deckH + 2} 20,${deckH}
+          L 250,${deckH} C 275,${deckH} 295,${deckH + 4} 300,${deckH + 14}
+          L 300,${keel - 8} C 296,${keel} 285,${keel} 270,${keel}
+          L 30,${keel} C 15,${keel} 4,${keel} 0,${keel - 8} Z`;
+      default: // STANDARD cargo
+        return `M 0,${deckH + 10} C 0,${deckH + 4} 8,${deckH} 22,${deckH}
+          L 270,${deckH} C 288,${deckH} 300,${deckH + 6} 300,${deckH + 18}
+          L 300,${keel - 5} C 298,${keel} 290,${keel} 278,${keel}
+          L 22,${keel} C 10,${keel} 0,${keel} 0,${keel - 5} Z`;
+    }
+  };
+
+  const planPath = getPlanPath();
+  const profilePath = getProfilePath();
+  const wlY = 90 - draftRatio * 70; // waterline Y in profile SVG
+
+  const isNew = !dim.L || !dim.B || !dim.D;
+  const color = view === 'PLAN' ? '#3b82f6' : '#f43f5e';
 
   return (
-    <div className="relative w-full h-44 bg-black/20 rounded-xl border border-white/[0.05] flex flex-col items-center justify-center overflow-hidden group">
-      <div className="absolute inset-0" style={{ backgroundImage: 'linear-gradient(rgba(255,255,255,0.03) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,0.03) 1px, transparent 1px)', backgroundSize: '10px 10px' }} />
-      
-      <div className="absolute top-2 right-2 z-10 flex gap-1 bg-[#1a1a2e] rounded-md p-1 border border-white/10">
-        <button onClick={() => setView('PLAN')} className={`text-[9px] px-2 py-0.5 rounded ${view==='PLAN'?'bg-blue-500/20 text-blue-400 font-bold':'text-[#555]'}`}>PLAN</button>
-        <button onClick={() => setView('PROFILE')} className={`text-[9px] px-2 py-0.5 rounded ${view==='PROFILE'?'bg-rose-500/20 text-rose-400 font-bold':'text-[#555]'}`}>PROFILE</button>
+    <div className="relative w-full bg-black/20 rounded-xl border border-white/[0.07] overflow-hidden" style={{ height: 180 }}>
+      {/* Grid background */}
+      <div className="absolute inset-0" style={{ backgroundImage: 'linear-gradient(rgba(255,255,255,0.025) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,0.025) 1px, transparent 1px)', backgroundSize: '15px 15px' }} />
+
+      {/* Tab switcher */}
+      <div className="absolute top-2 right-2 z-10 flex gap-0.5 bg-black/40 rounded-lg p-0.5 border border-white/10 backdrop-blur-sm">
+        <button onClick={() => setView('PLAN')} className={`text-[9px] px-2.5 py-1 rounded-md font-bold tracking-wider transition-all ${view === 'PLAN' ? 'bg-blue-500/30 text-blue-300 shadow-[0_0_8px_rgba(59,130,246,0.3)]' : 'text-[#555] hover:text-[#888]'}`}>PLAN</button>
+        <button onClick={() => setView('PROFILE')} className={`text-[9px] px-2.5 py-1 rounded-md font-bold tracking-wider transition-all ${view === 'PROFILE' ? 'bg-rose-500/30 text-rose-300 shadow-[0_0_8px_rgba(244,63,94,0.3)]' : 'text-[#555] hover:text-[#888]'}`}>PROFILE</button>
       </div>
 
-      <svg viewBox="-20 0 340 100" className={`w-full h-full p-4 transition-colors duration-500 ${view==='PLAN'?'text-blue-500/80 drop-shadow-[0_0_8px_rgba(59,130,246,0.5)]':'text-rose-500/80 drop-shadow-[0_0_8px_rgba(244,63,94,0.5)]'}`}>
-        {view === 'PLAN' && (
-          <>
-            <motion.path 
-              d={planPath}
-              initial={false}
-              animate={{ d: planPath }}
-              transition={{ type: "spring", stiffness: 60, damping: 15 }}
-              fill="currentColor" 
-              fillOpacity="0.1"
-              stroke="currentColor" 
-              strokeWidth="2"
-              strokeLinejoin="round"
-            />
-            <line x1="0" y1="50" x2="300" y2="50" stroke="rgba(255,255,255,0.2)" strokeWidth="1" strokeDasharray="4 4" />
-            {stations && stations.map((st, i) => (
-              <line key={i} x1={(st.pos/dim.L)*300} y1={50 - ((st.halfBreadth / (dim.B / 2)) * 40)} x2={(st.pos/dim.L)*300} y2={50 + ((st.halfBreadth / (dim.B / 2)) * 40)} stroke="rgba(255,255,255,0.05)" strokeWidth="0.5" />
-            ))}
-          </>
-        )}
-        
-        {view === 'PROFILE' && (
-          <>
-            <line x1="-20" y1="70" x2="320" y2="70" stroke="rgba(59,130,246,0.4)" strokeWidth="1" strokeDasharray="2 2" />
-            <text x="-15" y="66" fill="rgba(59,130,246,0.6)" fontSize="6" fontFamily="monospace">WATERLINE</text>
-            <motion.path 
-              d={profilePath}
-              initial={false}
-              animate={{ d: profilePath }}
-              transition={{ type: "spring", stiffness: 60, damping: 15 }}
-              fill="currentColor" 
-              fillOpacity="0.1"
-              stroke="currentColor" 
-              strokeWidth="2"
-              strokeLinejoin="round"
-            />
-          </>
-        )}
-      </svg>
-      
-      <div className="absolute top-2 left-3 flex flex-col">
-        <span className="text-[9px] text-[#888] font-mono tracking-widest uppercase text-left">{view} VIEW</span>
-        <span className="text-xs font-bold text-white text-left">{shapeType} HULL</span>
+      {/* Top-left label */}
+      <div className="absolute top-2 left-3 z-10">
+        <p className="text-[8px] text-[#666] font-mono tracking-[0.15em] uppercase">{view} View · {shape.type} Hull</p>
+        <p className="text-[10px] font-bold text-white leading-tight">{category}</p>
       </div>
-      <div className="absolute bottom-2 right-3 text-[9px] text-[#555] font-mono flex flex-col items-end">
-        <span>Cb: {VESSEL_FACTORS[category].cb.toFixed(2)}</span>
-        {dim.L && dim.B && <span>L/B: {(dim.L/dim.B).toFixed(2)}</span>}
+
+      {/* SVG drawing */}
+      <svg viewBox="-10 5 320 105" className="w-full h-full px-2 py-2" style={{ filter: `drop-shadow(0 0 10px ${color}55)` }}>
+        <defs>
+          <linearGradient id="hullGrad" x1="0" y1="0" x2="1" y2="0">
+            <stop offset="0%" stopColor={color} stopOpacity="0.6" />
+            <stop offset="50%" stopColor={color} stopOpacity="0.9" />
+            <stop offset="100%" stopColor={color} stopOpacity="0.5" />
+          </linearGradient>
+          <linearGradient id="fillGrad" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stopColor={color} stopOpacity="0.15" />
+            <stop offset="100%" stopColor={color} stopOpacity="0.03" />
+          </linearGradient>
+        </defs>
+
+        {/* PLAN VIEW */}
+        {view === 'PLAN' && (
+          <motion.g key="plan" initial={{ opacity: 0, scaleY: 0.6 }} animate={{ opacity: 1, scaleY: 1 }} transition={{ duration: 0.45, ease: 'easeOut' }}>
+            {/* Centerline */}
+            <line x1="0" y1="55" x2="300" y2="55" stroke="rgba(255,255,255,0.12)" strokeWidth="1" strokeDasharray="5 4" />
+            {/* BOW label */}
+            <text x="302" y="58" fill="rgba(255,255,255,0.3)" fontSize="6" fontFamily="monospace">BOW</text>
+            <text x="-18" y="58" fill="rgba(255,255,255,0.3)" fontSize="6" fontFamily="monospace">STN</text>
+            {/* Hull fill */}
+            <motion.path d={planPath} fill="url(#fillGrad)" initial={false} animate={{ d: planPath }} transition={{ type: 'spring', stiffness: 80, damping: 20 }} />
+            {/* Hull outline */}
+            <motion.path d={planPath} fill="none" stroke="url(#hullGrad)" strokeWidth="2" strokeLinejoin="round" initial={false} animate={{ d: planPath }} transition={{ type: 'spring', stiffness: 80, damping: 20 }} />
+            {/* Beam annotation */}
+            {dim.B && (
+              <>
+                <line x1="150" y1="15" x2="150" y2="95" stroke={color} strokeOpacity="0.2" strokeWidth="0.5" strokeDasharray="2 2" />
+                <text x="153" y="20" fill={color} fontSize="7" fontFamily="monospace" fillOpacity="0.7">B={dim.B}m</text>
+              </>
+            )}
+            {/* Length annotation */}
+            {dim.L && (
+              <text x="5" y="106" fill={color} fontSize="6.5" fontFamily="monospace" fillOpacity="0.6">L={dim.L}m  Cb={cb.toFixed(2)}</text>
+            )}
+          </motion.g>
+        )}
+
+        {/* PROFILE VIEW */}
+        {view === 'PROFILE' && (
+          <motion.g key="profile" initial={{ opacity: 0, scaleX: 0.7 }} animate={{ opacity: 1, scaleX: 1 }} transition={{ duration: 0.45, ease: 'easeOut' }}>
+            {/* Waterline */}
+            <line x1="-10" y1={wlY} x2="310" y2={wlY} stroke="#3b82f6" strokeOpacity="0.5" strokeWidth="1" strokeDasharray="3 3" />
+            <text x="-8" y={wlY - 2} fill="#3b82f6" fontSize="5.5" fontFamily="monospace" fillOpacity="0.7">WL</text>
+            {/* Baseline */}
+            <line x1="0" y1="90" x2="300" y2="90" stroke="rgba(255,255,255,0.07)" strokeWidth="1" />
+            {/* BOW / STERN labels */}
+            <text x="302" y="58" fill="rgba(255,255,255,0.3)" fontSize="6" fontFamily="monospace">BOW</text>
+            <text x="-18" y="58" fill="rgba(255,255,255,0.3)" fontSize="6" fontFamily="monospace">STN</text>
+            {/* Hull fill */}
+            <motion.path d={profilePath} fill="url(#fillGrad)" initial={false} animate={{ d: profilePath }} transition={{ type: 'spring', stiffness: 80, damping: 20 }} />
+            {/* Hull outline */}
+            <motion.path d={profilePath} fill="none" stroke="url(#hullGrad)" strokeWidth="2" strokeLinejoin="round" initial={false} animate={{ d: profilePath }} transition={{ type: 'spring', stiffness: 80, damping: 20 }} />
+            {/* Draft annotation */}
+            <line x1="308" y1={wlY} x2="308" y2="90" stroke={condColor} strokeOpacity="0.7" strokeWidth="1.5" />
+            <line x1="304" y1={wlY} x2="312" y2={wlY} stroke={condColor} strokeOpacity="0.7" strokeWidth="1" />
+            <line x1="304" y1="90" x2="312" y2="90" stroke={condColor} strokeOpacity="0.7" strokeWidth="1" />
+            <text x="313" y={((wlY + 90) / 2) + 2} fill={condColor} fontSize="6" fontFamily="monospace">T={T.toFixed(1)}m</text>
+            {/* Depth annotation */}
+            <text x="5" y="106" fill={color} fontSize="6.5" fontFamily="monospace" fillOpacity="0.6">D={dim.D}m  T={T.toFixed(1)}m  T/D={draftRatio.toFixed(2)}</text>
+          </motion.g>
+        )}
+
+        {/* Condition dot */}
+        <circle cx="292" cy="18" r="3" fill={condColor} opacity="0.9" />
+        <circle cx="292" cy="18" r="5" fill={condColor} opacity="0.2">
+          <animate attributeName="r" values="4;7;4" dur="2s" repeatCount="indefinite" />
+          <animate attributeName="opacity" values="0.3;0;0.3" dur="2s" repeatCount="indefinite" />
+        </circle>
+      </svg>
+
+      {/* Bottom condition label */}
+      <div className="absolute bottom-1.5 left-3 flex items-center gap-1.5">
+        <span className="w-1.5 h-1.5 rounded-full" style={{ background: condColor }} />
+        <span className="text-[9px] font-semibold" style={{ color: condColor }}>{condition}</span>
+        <span className="text-[9px] text-[#555]">· L/B={dim.L && dim.B ? (dim.L/dim.B).toFixed(1) : '–'}</span>
       </div>
     </div>
   );

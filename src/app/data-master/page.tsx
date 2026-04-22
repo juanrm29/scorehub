@@ -1,18 +1,41 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
 import Link from 'next/link';
-import { companies } from '@/lib/data';
+import { Company } from '@/lib/types';
+import { getCompanies, deleteCompanies } from '@/lib/store';
 import { LevelBadge } from '@/components/LevelBadge';
 import { getCompanyStatus, getCompanyCurrentScore, getCompanyCurrentLevel, getLevelColor, getStatusLabel, getStatusColor } from '@/lib/scoring';
-import { Database, Search, Filter, ChevronDown, Plus, Ship, Building2, ChevronRight, Clock, AlertTriangle, Download } from 'lucide-react';
+import { Database, Search, Filter, ChevronDown, Plus, Ship, Building2, ChevronRight, Clock, AlertTriangle, Download, Trash2, X } from 'lucide-react';
 import { exportDataMasterExcel } from '@/lib/exportExcel';
+import { ExcelImporter } from '@/components/ExcelImporter';
 
 export default function DataMasterPage() {
   const [search, setSearch] = useState('');
   const [filterLevel, setFilterLevel] = useState('ALL');
   const [filterStatus, setFilterStatus] = useState('ALL');
+  const [companies, setCompanies] = useState<Company[]>([]);
+  const [showDeleteMenu, setShowDeleteMenu] = useState(false);
+
+  const handleDelete = (category: 'ALL' | 'NEW_ONLY' | 'ACTIVE_REPEATED' | 'LAPSED') => {
+    const msg = category === 'ALL' 
+      ? 'PERINGATAN KRITIS: Anda akan menghapus SEMUA data perusahaan dan assessment. Lanjutkan?'
+      : `Hapus semua data dengan status ${category.replace('_', ' ')}?`;
+    if (window.confirm(msg)) {
+      deleteCompanies(category);
+      refreshData();
+      setShowDeleteMenu(false);
+    }
+  };
+
+  useEffect(() => {
+    setCompanies(getCompanies());
+  }, []);
+
+  const refreshData = () => {
+    setCompanies(getCompanies());
+  };
 
   const enriched = companies.map(c => ({
     ...c,
@@ -50,9 +73,30 @@ export default function DataMasterPage() {
           <h1 className="text-3xl font-black text-gradient">Data Master</h1>
           <p className="text-[#555] mt-1 text-sm">Click any company row to view detailed assessment history</p>
         </div>
-        <button onClick={() => exportDataMasterExcel(companies)} className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-gradient-to-r from-emerald-600/20 to-cyan-600/20 border border-emerald-500/20 text-emerald-400 text-sm font-semibold hover:border-emerald-500/40 hover:from-emerald-600/30 hover:to-cyan-600/30 transition-all">
-          <Download className="w-4 h-4" /> Export Excel
-        </button>
+        <div className="flex items-center gap-3">
+          <div className="relative">
+            <button onClick={() => setShowDeleteMenu(!showDeleteMenu)} className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-red-500/10 border border-red-500/20 text-red-400 text-sm font-semibold hover:bg-red-500/20 hover:border-red-500/40 transition-all">
+              <Trash2 className="w-4 h-4" /> Hapus Data
+            </button>
+            {showDeleteMenu && (
+              <div className="absolute top-full right-0 mt-2 w-56 p-2 rounded-xl bg-[#161622] border border-white/[0.08] shadow-2xl z-50 flex flex-col gap-1">
+                <div className="flex items-center justify-between px-2 pb-2 mb-1 border-b border-white/[0.08]">
+                  <span className="text-xs font-semibold text-[#888] uppercase tracking-wider">Pilih Kategori</span>
+                  <button onClick={() => setShowDeleteMenu(false)} className="text-[#666] hover:text-white transition-colors"><X className="w-4 h-4" /></button>
+                </div>
+                <button onClick={() => handleDelete('NEW_ONLY')} className="text-left px-3 py-2 rounded-lg text-sm text-[#ccc] hover:bg-cyan-500/20 hover:text-cyan-400 transition-colors">Hapus Pre-judgement</button>
+                <button onClick={() => handleDelete('ACTIVE_REPEATED')} className="text-left px-3 py-2 rounded-lg text-sm text-[#ccc] hover:bg-purple-500/20 hover:text-purple-400 transition-colors">Hapus Active Repeated</button>
+                <button onClick={() => handleDelete('LAPSED')} className="text-left px-3 py-2 rounded-lg text-sm text-[#ccc] hover:bg-amber-500/20 hover:text-amber-400 transition-colors">Hapus Lapsed (&gt;3yr)</button>
+                <div className="h-px bg-white/[0.08] my-1" />
+                <button onClick={() => handleDelete('ALL')} className="text-left px-3 py-2 rounded-lg text-sm text-red-400 hover:bg-red-500/20 transition-colors font-semibold">Hapus SEMUA Data</button>
+              </div>
+            )}
+          </div>
+          <ExcelImporter onImportComplete={refreshData} />
+          <button onClick={() => exportDataMasterExcel(companies)} className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-gradient-to-r from-emerald-600/20 to-cyan-600/20 border border-emerald-500/20 text-emerald-400 text-sm font-semibold hover:border-emerald-500/40 hover:from-emerald-600/30 hover:to-cyan-600/30 transition-all">
+            <Download className="w-4 h-4" /> Export Excel
+          </button>
+        </div>
       </motion.div>
 
       {/* Status Summary */}

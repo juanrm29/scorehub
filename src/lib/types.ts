@@ -15,14 +15,14 @@ export interface NewCustomerInput {
   email: string;
   phone: string;
   location: string;
-  fleetSize: number;
-  estimatedValue: number;
-  termPayment: number;
-  legalDocuments: string;
-  backgroundMedia: string;
-  hasReference: boolean;
-  technicalDocuments: string;
-  decisionSpeed: number;
+  fleetSize?: number;
+  estimatedValue?: number;
+  termPayment?: number;
+  legalDocuments?: string;
+  backgroundMedia?: string;
+  hasReference?: boolean;
+  technicalDocuments?: string;
+  decisionSpeed?: number;
 }
 
 export interface NewCustomerScores {
@@ -51,20 +51,20 @@ export interface RepeatedCustomerInput {
   email: string;
   phone: string;
   location: string;
-  kontribusiOmset: number;
-  margin: number;
-  ketepatanBayarHari: number;
-  revisiInvoice: number;
-  penagihanCount: number;
-  cancelOrder: number;
-  scheduleVariance: number;
-  konflikQC: number;
-  intervensi: number;
-  komunikasiPIC: KomunikasiLevel;
-  claimCount: number;
-  lamaKerjasama: number;
-  fleetSize: number;
-  hasReferral: boolean;
+  kontribusiOmset?: number;
+  margin?: number;
+  ketepatanBayarHari?: number;
+  revisiInvoice?: number;
+  penagihanCount?: number;
+  cancelOrder?: number;
+  scheduleVariance?: number;
+  konflikQC?: number;
+  intervensi?: number;
+  komunikasiPIC?: KomunikasiLevel;
+  claimCount?: number;
+  lamaKerjasama?: number;
+  fleetSize?: number;
+  hasReferral?: boolean;
 }
 
 export interface RepeatedCustomerScores {

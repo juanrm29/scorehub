@@ -2,12 +2,13 @@
 
 import { useState, useEffect, useMemo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { companies as allCompanies } from '@/lib/data';
+import { getCompanies } from '@/lib/store';
+import { Company } from '@/lib/types';
 import {
   getCompanyStatus, getCompanyCurrentScore, getCompanyCurrentLevel,
   getLevelColor, getLevelEmoji, getStatusLabel,
 } from '@/lib/scoring';
-import { Company, ClientLevel } from '@/lib/types';
+import { ClientLevel } from '@/lib/types';
 import { LevelBadge } from '@/components/LevelBadge';
 import {
   GitCompareArrows, Plus, X, Search, Building2, Trophy, TrendingUp,
@@ -130,8 +131,8 @@ function MetricRow({ label, values, colors, format = 'score', icon: Icon }: {
 }
 
 // ==================== COMPANY SELECTOR ====================
-function CompanySelector({ index, selected, onSelect, onRemove, color }: {
-  index: number; selected: Company | null; onSelect: (c: Company) => void; onRemove: () => void; color: string;
+function CompanySelector({ index, selected, onSelect, onRemove, color, allCompanies }: {
+  index: number; selected: Company | null; onSelect: (c: Company) => void; onRemove: () => void; color: string; allCompanies: Company[];
 }) {
   const [searchOpen, setSearchOpen] = useState(false);
   const [search, setSearch] = useState('');
@@ -140,7 +141,7 @@ function CompanySelector({ index, selected, onSelect, onRemove, color }: {
     if (!search.trim()) return allCompanies.slice(0, 15);
     const q = search.toLowerCase();
     return allCompanies.filter(c => c.companyName.toLowerCase().includes(q) || c.location.toLowerCase().includes(q)).slice(0, 15);
-  }, [search]);
+  }, [search, allCompanies]);
 
   if (selected) {
     const score = getCompanyCurrentScore(selected);
@@ -240,8 +241,13 @@ function CompanySelector({ index, selected, onSelect, onRemove, color }: {
 // ==================== MAIN PAGE ====================
 export default function ComparePage() {
   const [slots, setSlots] = useState<(Company | null)[]>([null, null, null]);
+  const [allCompanies, setAllCompanies] = useState<Company[]>([]);
   const [mounted, setMounted] = useState(false);
-  useEffect(() => setMounted(true), []);
+  
+  useEffect(() => {
+    setAllCompanies(getCompanies());
+    setMounted(true);
+  }, []);
 
   if (!mounted) return null;
 
@@ -313,7 +319,7 @@ export default function ComparePage() {
       {/* Company Selector Grid */}
       <div className="grid grid-cols-3 gap-5">
         {slots.map((slot, i) => (
-          <CompanySelector key={i} index={i} selected={slot} color={RADAR_COLORS[i]}
+          <CompanySelector key={i} index={i} selected={slot} color={RADAR_COLORS[i]} allCompanies={allCompanies}
             onSelect={c => setSlot(i, c)} onRemove={() => setSlot(i, null)} />
         ))}
       </div>

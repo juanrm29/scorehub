@@ -4,9 +4,11 @@ import { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { calculateNewCustomer, calculateRepeatedCustomer, getLevelColor, getCompanyStatus, getCompanyCurrentScore } from '@/lib/scoring';
 import { getCompanies, addNewAssessment, addRepeatedAssessment, addCompany } from '@/lib/store';
+import { pushNewAssessmentToSheets, pushRepeatedAssessmentToSheets } from '@/lib/pushToSheets';
 import { NewCustomerInput, RepeatedCustomerInput, KomunikasiLevel, Company } from '@/lib/types';
 import { ScoreRing } from '@/components/ScoreRing';
 import { LevelBadge } from '@/components/LevelBadge';
+import { InfoTooltip } from '@/components/InfoTooltip';
 import { Calculator, Zap, UserPlus, RefreshCw, AlertTriangle, Info, CheckCircle2, Building2, Save, Plus, ArrowRight, Sparkles } from 'lucide-react';
 import Link from 'next/link';
 
@@ -46,6 +48,7 @@ function ScoreBar({ label, score, max = 5 }: { label: string; score: number; max
 
 export default function CalculatorPage() {
   const [tab, setTab] = useState<Tab>('new');
+  const [searchCompanyTerm, setSearchCompanyTerm] = useState('');
   const [newInput, setNewInput] = useState(defaultNew);
   const [repInput, setRepInput] = useState(defaultRepeated);
   const [calculated, setCalculated] = useState(false);
@@ -130,14 +133,28 @@ export default function CalculatorPage() {
     try {
       if (tab === 'new') {
         addNewAssessment(targetCompanyId, projectName, assessmentDate, newInput, notes || undefined);
+        // Push to Google Sheets (fire-and-forget)
+        const savedCompany = getCompanies().find(c => c.id === targetCompanyId)!;
+        const savedAssessment = savedCompany?.newAssessments.at(-1);
+        if (savedAssessment) pushNewAssessmentToSheets(savedCompany, savedAssessment);
         setSavedId(targetCompanyId);
       } else {
         if (!periodStart || !periodEnd) { alert('Period start and end are required for Repeated assessment'); return; }
         addRepeatedAssessment(targetCompanyId, projectName, assessmentDate, periodStart, periodEnd, repInput, notes || undefined);
+        // Push to Google Sheets (fire-and-forget)
+        const savedCompany = getCompanies().find(c => c.id === targetCompanyId)!;
+        const savedAssessment = savedCompany?.repeatedAssessments.at(-1);
+        if (savedAssessment) pushRepeatedAssessmentToSheets(savedCompany, savedAssessment);
         setSavedId(targetCompanyId);
       }
       setSaved(true);
       setCompaniesState(getCompanies());
+      
+      // Select the newly created company so it doesn't get stuck on Add New form
+      if (isNewCompany) {
+        setIsNewCompany(false);
+        setSelectedCompany(targetCompanyId);
+      }
     } catch (e: unknown) {
       alert('Error saving: ' + (e instanceof Error ? e.message : String(e)));
     }
@@ -166,11 +183,20 @@ export default function CalculatorPage() {
         <div className="flex items-center gap-4">
           <Building2 className="w-5 h-5 text-purple-400 shrink-0" />
           <div className="flex-1">
-            <label className="block text-xs text-[#666] mb-1.5">Select Company</label>
+            <div className="flex items-center justify-between mb-1.5">
+              <label className="block text-xs text-[#666]">Select Company</label>
+              <input 
+                type="text" 
+                placeholder="Search..." 
+                className="w-32 text-xs py-1 px-2 border-none bg-white/5 rounded-md focus:ring-1 ring-blue-500/50 outline-none"
+                value={searchCompanyTerm}
+                onChange={e => setSearchCompanyTerm(e.target.value)}
+              />
+            </div>
             <select value={isNewCompany ? '__new__' : selectedCompany} onChange={e => handleSelectCompany(e.target.value)} className="w-full">
               <option value="">— Select company —</option>
               <option value="__new__">➕ Add New Company</option>
-              {companies.map(c => {
+              {companies.filter(c => c.companyName.toLowerCase().includes(searchCompanyTerm.toLowerCase())).map(c => {
                 const st = getCompanyStatus(c);
                 return <option key={c.id} value={c.id}>{c.companyName} [{st === 'NEW_ONLY' ? '🆕 New' : st === 'ACTIVE_REPEATED' ? '🔄 Repeated' : '⏰ Lapsed'}]</option>;
               })}
@@ -294,68 +320,68 @@ export default function CalculatorPage() {
           {tab === 'new' ? (
             <div className="space-y-4">
               <div className="border border-[#1a1a2e] rounded-xl p-4 space-y-3">
-                <h3 className="text-xs font-bold text-blue-400 uppercase tracking-wider">Commercial Potential (50%)</h3>
+                <h3 className="text-xs font-bold text-blue-400 uppercase tracking-wider flex items-center gap-2">Commercial Potential (50%) <span className="text-[10px] bg-blue-500/20 text-blue-400 px-1.5 py-0.5 rounded font-normal">Opsional</span></h3>
                 <div className="grid grid-cols-3 gap-3">
-                  <div><label className="block text-xs text-[#666] mb-1">Fleet Size</label><input type="number" value={newInput.fleetSize} onChange={e => setNewInput({ ...newInput, fleetSize: +e.target.value })} /></div>
-                  <div><label className="block text-xs text-[#666] mb-1">Estimated Value (IDR)</label><input type="number" value={newInput.estimatedValue} onChange={e => setNewInput({ ...newInput, estimatedValue: +e.target.value })} /></div>
-                  <div><label className="block text-xs text-[#666] mb-1">Term Payment (days)</label><input type="number" value={newInput.termPayment} onChange={e => setNewInput({ ...newInput, termPayment: +e.target.value })} /></div>
+                  <div><label className="block text-xs text-[#666] mb-1">Fleet Size<InfoTooltip content="5: >20 Fleet\n4: 15 sd 20 Fleet\n3: 10 sd 15 Fleet\n2: 5 sd 10 Fleet\n1: < 5 Fleet" /></label><input type="number" placeholder="Kosongkan jika skip" value={newInput.fleetSize ?? ''} onChange={e => setNewInput({ ...newInput, fleetSize: e.target.value ? +e.target.value : undefined })} /></div>
+                  <div><label className="block text-xs text-[#666] mb-1">Estimated Value (IDR)<InfoTooltip content="5: >Rp 3 Miliar\n4: Rp 2M - 3M\n3: Rp 1M - 2M\n2: Rp 500jt - 1M\n1: <Rp 500jt" /></label><input type="number" placeholder="Mis: 1000000000" value={newInput.estimatedValue ?? ''} onChange={e => setNewInput({ ...newInput, estimatedValue: e.target.value ? +e.target.value : undefined })} /></div>
+                  <div><label className="block text-xs text-[#666] mb-1">Term Payment (Days)<InfoTooltip content="5: DP 50%, Final 50%\n4: DP 30%, Term 40%, Final 30%\n3: DP 0%, Final 100%\n2: DP 30%, Term 40%, Final 30% (30 Hari)\n1: DP 50%, Final 50% (30 Hari)" /></label><input type="number" placeholder="Mis: 30" value={newInput.termPayment ?? ''} onChange={e => setNewInput({ ...newInput, termPayment: e.target.value ? +e.target.value : undefined })} /></div>
                 </div>
               </div>
               <div className="border border-[#1a1a2e] rounded-xl p-4 space-y-3">
-                <h3 className="text-xs font-bold text-purple-400 uppercase tracking-wider">Credibility (30%)</h3>
+                <h3 className="text-xs font-bold text-purple-400 uppercase tracking-wider flex items-center gap-2">Credibility (30%) <span className="text-[10px] bg-purple-500/20 text-purple-400 px-1.5 py-0.5 rounded font-normal">Opsional</span></h3>
                 <div className="grid grid-cols-3 gap-3">
-                  <div><label className="block text-xs text-[#666] mb-1">Legal Documents</label><input type="text" value={newInput.legalDocuments} onChange={e => setNewInput({ ...newInput, legalDocuments: e.target.value })} placeholder="1,2,3,4,5" /></div>
-                  <div><label className="block text-xs text-[#666] mb-1">Background Media</label><input type="text" value={newInput.backgroundMedia} onChange={e => setNewInput({ ...newInput, backgroundMedia: e.target.value })} placeholder="1,2,3 (Website,LinkedIn,Instagram)" /></div>
-                  <div><label className="block text-xs text-[#666] mb-1">Has Reference</label><select value={newInput.hasReference ? 'yes' : 'no'} onChange={e => setNewInput({ ...newInput, hasReference: e.target.value === 'yes' })}><option value="yes">Ya</option><option value="no">Tidak</option></select></div>
+                  <div><label className="block text-xs text-[#666] mb-1">Legal Documents<InfoTooltip content="5: 1,2,3,4,5 (Lengkap)\n4: 1,2,4,5\n3: 1,2,4\n2: 2,4\n1: < 2 Dokumen\n(1:Izin 2:NPWP 3:CSMS 4:Rek 5:SPK)" /></label><input type="text" value={newInput.legalDocuments ?? ''} onChange={e => setNewInput({ ...newInput, legalDocuments: e.target.value ? e.target.value : undefined })} placeholder="Akte, NIB, NPWP" /></div>
+                  <div><label className="block text-xs text-[#666] mb-1">Background Media<InfoTooltip content="5: Web, Linked, IG\n4: 2 Media\n3: 1 Media\n1: Kosong" /></label><input type="text" value={newInput.backgroundMedia ?? ''} onChange={e => setNewInput({ ...newInput, backgroundMedia: e.target.value ? e.target.value : undefined })} placeholder="Web, Social, News" /></div>
+                  <div><label className="block text-xs text-[#666] mb-1">Has Reference?<InfoTooltip content="5: Ada referensi relasi\n1: Tidak ada referensi" /></label><select value={newInput.hasReference === undefined ? '' : newInput.hasReference ? 'yes' : 'no'} onChange={e => setNewInput({ ...newInput, hasReference: e.target.value === '' ? undefined : e.target.value === 'yes' })}><option value="">— Skip —</option><option value="yes">Ya</option><option value="no">Tidak</option></select></div>
                 </div>
               </div>
               <div className="border border-[#1a1a2e] rounded-xl p-4 space-y-3">
-                <h3 className="text-xs font-bold text-cyan-400 uppercase tracking-wider">Technical Clarity (20%)</h3>
+                <h3 className="text-xs font-bold text-cyan-400 uppercase tracking-wider flex items-center gap-2">Technical Clarity (20%) <span className="text-[10px] bg-cyan-500/20 text-cyan-400 px-1.5 py-0.5 rounded font-normal">Opsional</span></h3>
                 <div className="grid grid-cols-2 gap-3">
-                  <div><label className="block text-xs text-[#666] mb-1">Technical Documents</label><input type="text" value={newInput.technicalDocuments} onChange={e => setNewInput({ ...newInput, technicalDocuments: e.target.value })} placeholder="1,2,3" /></div>
-                  <div><label className="block text-xs text-[#666] mb-1">Decision Speed (1-5)</label><input type="number" min={1} max={5} value={newInput.decisionSpeed} onChange={e => setNewInput({ ...newInput, decisionSpeed: +e.target.value })} /></div>
+                  <div><label className="block text-xs text-[#666] mb-1">Technical Documents<InfoTooltip content="5: Ship part, Surat laut, Repair list\n4: Ship part & Repair list\n3: Ship part / Surat laut\n1: Kosong" /></label><input type="text" value={newInput.technicalDocuments ?? ''} onChange={e => setNewInput({ ...newInput, technicalDocuments: e.target.value ? e.target.value : undefined })} placeholder="Vessel Spec, Draw" /></div>
+                  <div><label className="block text-xs text-[#666] mb-1">Decision Speed (1-5)<InfoTooltip content="5: < 2 hari\n4: 3 sd 5 hari\n3: 5 sd 7 hari\n2: 7 sd 14 hari\n1: > 14 hari" /></label><input type="number" min={1} max={5} placeholder="1-5" value={newInput.decisionSpeed ?? ''} onChange={e => setNewInput({ ...newInput, decisionSpeed: e.target.value ? +e.target.value : undefined })} /></div>
                 </div>
               </div>
             </div>
           ) : (
             <div className="space-y-4">
               <div className="border border-[#1a1a2e] rounded-xl p-4 space-y-3">
-                <h3 className="text-xs font-bold text-green-400 uppercase tracking-wider">Revenue Contribution (30%)</h3>
+                <h3 className="text-xs font-bold text-green-400 uppercase tracking-wider flex items-center gap-2">Revenue Contribution (30%) <span className="text-[10px] bg-green-500/20 text-green-400 px-1.5 py-0.5 rounded font-normal">Opsional</span></h3>
                 <div className="grid grid-cols-2 gap-3">
-                  <div><label className="block text-xs text-[#666] mb-1">Kontribusi Omset (%)</label><input type="number" value={repInput.kontribusiOmset} onChange={e => setRepInput({ ...repInput, kontribusiOmset: +e.target.value })} /></div>
-                  <div><label className="block text-xs text-[#666] mb-1">Margin (%)</label><input type="number" value={repInput.margin} onChange={e => setRepInput({ ...repInput, margin: +e.target.value })} /></div>
+                  <div><label className="block text-xs text-[#666] mb-1">Persentasi Omset (%)<InfoTooltip content="5: > 15%\n4: 15% sd 10%\n3: 10% sd 5%\n2: 5% sd 1%\n1: < 1%" /></label><input type="number" placeholder="Kosongkan jika skip" value={repInput.kontribusiOmset ?? ''} onChange={e => setRepInput({ ...repInput, kontribusiOmset: e.target.value ? +e.target.value : undefined })} /></div>
+                  <div><label className="block text-xs text-[#666] mb-1">Persentasi Profit (%)<InfoTooltip content="5: > 30%\n4: 30% sd 25%\n3: 25% sd 20%\n2: 20% sd 15%\n1: < 15%" /></label><input type="number" placeholder="Kosongkan jika skip" value={repInput.margin ?? ''} onChange={e => setRepInput({ ...repInput, margin: e.target.value ? +e.target.value : undefined })} /></div>
                 </div>
               </div>
               <div className="border border-[#1a1a2e] rounded-xl p-4 space-y-3">
-                <h3 className="text-xs font-bold text-blue-400 uppercase tracking-wider">Payment Behaviour (30%)</h3>
+                <h3 className="text-xs font-bold text-blue-400 uppercase tracking-wider flex items-center gap-2">Payment Behaviour (30%) <span className="text-[10px] bg-blue-500/20 text-blue-400 px-1.5 py-0.5 rounded font-normal">Opsional</span></h3>
                 <div className="grid grid-cols-3 gap-3">
-                  <div><label className="block text-xs text-[#666] mb-1">Keterlambatan Bayar (hari)</label><input type="number" value={repInput.ketepatanBayarHari} onChange={e => setRepInput({ ...repInput, ketepatanBayarHari: +e.target.value })} /></div>
-                  <div><label className="block text-xs text-[#666] mb-1">Revisi Invoice</label><input type="number" value={repInput.revisiInvoice} onChange={e => setRepInput({ ...repInput, revisiInvoice: +e.target.value })} /></div>
-                  <div><label className="block text-xs text-[#666] mb-1">Penagihan Count</label><input type="number" value={repInput.penagihanCount} onChange={e => setRepInput({ ...repInput, penagihanCount: +e.target.value })} /></div>
+                  <div><label className="block text-xs text-[#666] mb-1">Keterlambatan Bayar (Hari)<InfoTooltip content="5: 0 day\n4: < 7 day\n3: < 14 day\n2: < 21 day\n1: > 21 day" /></label><input type="number" placeholder="Mis: 0" value={repInput.ketepatanBayarHari ?? ''} onChange={e => setRepInput({ ...repInput, ketepatanBayarHari: e.target.value ? +e.target.value : undefined })} /></div>
+                  <div><label className="block text-xs text-[#666] mb-1">Jumlah Revisi Invoice<InfoTooltip content="5: Tidak pernah\n4: Jarang\n3: Kadang\n2: Sering\n1: Selalu" /></label><input type="number" placeholder="Mis: 0" value={repInput.revisiInvoice ?? ''} onChange={e => setRepInput({ ...repInput, revisiInvoice: e.target.value ? +e.target.value : undefined })} /></div>
+                  <div><label className="block text-xs text-[#666] mb-1">Jumlah Penagihan<InfoTooltip content="5: 1 kali\n4: 2 kali\n3: 3 kali\n2: 4 kali\n1: > 4 kali" /></label><input type="number" placeholder="Mis: 1" value={repInput.penagihanCount ?? ''} onChange={e => setRepInput({ ...repInput, penagihanCount: e.target.value ? +e.target.value : undefined })} /></div>
                 </div>
               </div>
               <div className="border border-[#1a1a2e] rounded-xl p-4 space-y-3">
-                <h3 className="text-xs font-bold text-amber-400 uppercase tracking-wider">Operational Behaviour (15%)</h3>
+                <h3 className="text-xs font-bold text-amber-400 uppercase tracking-wider flex items-center gap-2">Operational Behaviour (15%) <span className="text-[10px] bg-amber-500/20 text-amber-400 px-1.5 py-0.5 rounded font-normal">Opsional</span></h3>
                 <div className="grid grid-cols-4 gap-3">
-                  <div><label className="block text-xs text-[#666] mb-1">Cancel Order</label><input type="number" value={repInput.cancelOrder} onChange={e => setRepInput({ ...repInput, cancelOrder: +e.target.value })} /></div>
-                  <div><label className="block text-xs text-[#666] mb-1">Schedule Var.</label><input type="number" value={repInput.scheduleVariance} onChange={e => setRepInput({ ...repInput, scheduleVariance: +e.target.value })} /></div>
-                  <div><label className="block text-xs text-[#666] mb-1">Konflik QC</label><input type="number" value={repInput.konflikQC} onChange={e => setRepInput({ ...repInput, konflikQC: +e.target.value })} /></div>
-                  <div><label className="block text-xs text-[#666] mb-1">Intervensi</label><input type="number" value={repInput.intervensi} onChange={e => setRepInput({ ...repInput, intervensi: +e.target.value })} /></div>
+                  <div><label className="block text-xs text-[#666] mb-1">Cancel Order<InfoTooltip content="5: 1 kali\n4: 2 kali\n3: 3 kali\n2: 4 kali\n1: > 4 kali" /></label><input type="number" placeholder="0" value={repInput.cancelOrder ?? ''} onChange={e => setRepInput({ ...repInput, cancelOrder: e.target.value ? +e.target.value : undefined })} /></div>
+                  <div><label className="block text-xs text-[#666] mb-1">Telat Jadwal (Hari)<InfoTooltip content="5: > 3 hari sebelum\n4: < 3 hari sebelum\n3: Sesuai schedule\n2: < 3 hari sesudah\n1: > 3 hari sesudah" /></label><input type="number" placeholder="0" value={repInput.scheduleVariance ?? ''} onChange={e => setRepInput({ ...repInput, scheduleVariance: e.target.value ? +e.target.value : undefined })} /></div>
+                  <div><label className="block text-xs text-[#666] mb-1">Konflik QC<InfoTooltip content="5: 0 kali\n4: 1 kali\n3: 2 kali\n2: 3 kali\n1: > 3 kali" /></label><input type="number" placeholder="0" value={repInput.konflikQC ?? ''} onChange={e => setRepInput({ ...repInput, konflikQC: e.target.value ? +e.target.value : undefined })} /></div>
+                  <div><label className="block text-xs text-[#666] mb-1">Intervensi<InfoTooltip content="5: 0 kali\n4: 1 kali\n3: 2 kali\n2: 3 kali\n1: > 3 kali" /></label><input type="number" placeholder="0" value={repInput.intervensi ?? ''} onChange={e => setRepInput({ ...repInput, intervensi: e.target.value ? +e.target.value : undefined })} /></div>
                 </div>
               </div>
               <div className="border border-[#1a1a2e] rounded-xl p-4 space-y-3">
-                <h3 className="text-xs font-bold text-pink-400 uppercase tracking-wider">Relationship Quality (15%)</h3>
+                <h3 className="text-xs font-bold text-pink-400 uppercase tracking-wider flex items-center gap-2">Relationship Quality (15%) <span className="text-[10px] bg-pink-500/20 text-pink-400 px-1.5 py-0.5 rounded font-normal">Opsional</span></h3>
                 <div className="grid grid-cols-2 gap-3">
-                  <div><label className="block text-xs text-[#666] mb-1">Komunikasi PIC</label><select value={repInput.komunikasiPIC} onChange={e => setRepInput({ ...repInput, komunikasiPIC: e.target.value as KomunikasiLevel })}><option value="SB">Sangat Baik</option><option value="B">Baik</option><option value="C">Cukup</option><option value="K">Kurang</option><option value="SK">Sangat Kurang</option></select></div>
-                  <div><label className="block text-xs text-[#666] mb-1">Claim Count</label><input type="number" value={repInput.claimCount} onChange={e => setRepInput({ ...repInput, claimCount: +e.target.value })} /></div>
+                  <div><label className="block text-xs text-[#666] mb-1">Survey Komunikasi<InfoTooltip content="5: Sangat Baik\n4: Baik\n3: Cukup\n2: Kurang\n1: Sangat Kurang" /></label><select value={repInput.komunikasiPIC ?? ''} onChange={e => setRepInput({ ...repInput, komunikasiPIC: e.target.value ? e.target.value as KomunikasiLevel : undefined })}><option value="">— Skip Parameter —</option><option value="SB">Sangat Baik</option><option value="B">Baik</option><option value="C">Cukup</option><option value="K">Kurang</option><option value="SK">Sangat Kurang</option></select></div>
+                  <div><label className="block text-xs text-[#666] mb-1">Jumlah Komplain/Claim<InfoTooltip content="5: 0 kali\n4: 1 kali\n3: 2 kali\n2: 3 kali\n1: > 3 kali" /></label><input type="number" placeholder="0" value={repInput.claimCount ?? ''} onChange={e => setRepInput({ ...repInput, claimCount: e.target.value ? +e.target.value : undefined })} /></div>
                 </div>
               </div>
               <div className="border border-[#1a1a2e] rounded-xl p-4 space-y-3">
-                <h3 className="text-xs font-bold text-emerald-400 uppercase tracking-wider">Value Customer (10%)</h3>
+                <h3 className="text-xs font-bold text-emerald-400 uppercase tracking-wider flex items-center gap-2">Value Customer (10%) <span className="text-[10px] bg-emerald-500/20 text-emerald-400 px-1.5 py-0.5 rounded font-normal">Opsional</span></h3>
                 <div className="grid grid-cols-3 gap-3">
-                  <div><label className="block text-xs text-[#666] mb-1">Lama Kerjasama (tahun)</label><input type="number" value={repInput.lamaKerjasama} onChange={e => setRepInput({ ...repInput, lamaKerjasama: +e.target.value })} /></div>
-                  <div><label className="block text-xs text-[#666] mb-1">Fleet Size</label><input type="number" value={repInput.fleetSize} onChange={e => setRepInput({ ...repInput, fleetSize: +e.target.value })} /></div>
-                  <div><label className="block text-xs text-[#666] mb-1">Has Referral</label><select value={repInput.hasReferral ? 'yes' : 'no'} onChange={e => setRepInput({ ...repInput, hasReferral: e.target.value === 'yes' })}><option value="yes">Ya</option><option value="no">Tidak</option></select></div>
+                  <div><label className="block text-xs text-[#666] mb-1">Lama Kerjasama (Tahun)<InfoTooltip content="5: > 3 tahun\n4: 3 tahun\n3: 2 tahun\n2: 1 tahun\n1: < 1 tahun" /></label><input type="number" placeholder="Mis: 2" value={repInput.lamaKerjasama ?? ''} onChange={e => setRepInput({ ...repInput, lamaKerjasama: e.target.value ? +e.target.value : undefined })} /></div>
+                  <div><label className="block text-xs text-[#666] mb-1">Jumlah Fleet<InfoTooltip content="5: > 20 Fleet\n4: 15 sd 20 Fleet\n3: 10 sd 15 Fleet\n2: 5 sd 10 Fleet\n1: < 5 Fleet" /></label><input type="number" placeholder="Mis: 5" value={repInput.fleetSize ?? ''} onChange={e => setRepInput({ ...repInput, fleetSize: e.target.value ? +e.target.value : undefined })} /></div>
+                  <div><label className="block text-xs text-[#666] mb-1">Punya Referensi?<InfoTooltip content="5: Memberikan referral\n1: Tidak memberikan" /></label><select value={repInput.hasReferral === undefined ? '' : repInput.hasReferral ? 'yes' : 'no'} onChange={e => setRepInput({ ...repInput, hasReferral: e.target.value === '' ? undefined : e.target.value === 'yes' })}><option value="">— Skip —</option><option value="yes">Ya</option><option value="no">Tidak</option></select></div>
                 </div>
               </div>
             </div>

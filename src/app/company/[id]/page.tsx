@@ -1,15 +1,68 @@
 'use client';
 
 import { useParams } from 'next/navigation';
+import { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
 import Link from 'next/link';
-import { companies } from '@/lib/data';
+import { getCompanies } from '@/lib/store';
+import { Company } from '@/lib/types';
 import { getCompanyStatus, getCompanyCurrentScore, getCompanyCurrentLevel, getLevelColor, getStatusLabel, getStatusColor, daysSinceLastDeal, yearsUntilLapse, generateAIExecutiveSummary, calculateChurnRisk, calculateLTV } from '@/lib/scoring';
 import { ScoreRing } from '@/components/ScoreRing';
 import { LevelBadge } from '@/components/LevelBadge';
-import { ArrowLeft, Building2, MapPin, User, Calendar, Ship, Clock, AlertTriangle, TrendingUp, TrendingDown, Minus, FileText, Download, Sparkles, Activity, Target } from 'lucide-react';
+import { ArrowLeft, Building2, MapPin, User, Calendar, Ship, Clock, AlertTriangle, TrendingUp, TrendingDown, Minus, FileText, Download, Sparkles, Activity, Target, Edit2, Trash2 } from 'lucide-react';
 import { exportCompanyReportPDF, exportAssessmentPDF } from '@/lib/exportPdf';
-import { CompanyStatus, NewAssessment, RepeatedAssessment } from '@/lib/types';
+import { CompanyStatus, NewAssessment, RepeatedAssessment, NewCustomerInput, RepeatedCustomerInput } from '@/lib/types';
+import { deleteAssessment } from '@/lib/store';
+import { EditAssessmentModal } from '@/components/EditAssessmentModal';
+
+function RawDataViewer({ input, type }: { input: any, type: 'NEW' | 'REPEATED' }) {
+  const formatCurrency = (val?: number) => val !== undefined && val !== null ? new Intl.NumberFormat('id-ID', { style: 'currency', currency: 'IDR', minimumFractionDigits: 0 }).format(val) : '-';
+  const formatPercent = (val?: number) => val !== undefined && val !== null ? `${val}%` : '-';
+  const formatStr = (val?: any) => (val !== undefined && val !== null && String(val).trim() !== '') ? String(val) : '-';
+  const formatBool = (val?: boolean) => val === true ? 'Yes' : val === false ? 'No' : '-';
+
+  if (type === 'NEW') {
+    const d = input as NewCustomerInput;
+    return (
+      <div className="bg-[#11111a] rounded-lg p-4 mt-4 border border-[#2a2a3a]">
+        <h4 className="text-[10px] font-bold text-[#888] uppercase tracking-widest mb-3">Raw Imported Data</h4>
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-y-3 gap-x-4 text-xs">
+          <div><span className="text-[#555] block mb-0.5">Est. Value (Project)</span><span className="font-semibold text-white">{formatCurrency(d.estimatedValue)}</span></div>
+          <div><span className="text-[#555] block mb-0.5">Term Payment</span><span className="font-semibold text-white">{formatStr(d.termPayment)} hari</span></div>
+          <div><span className="text-[#555] block mb-0.5">Fleet Size</span><span className="font-semibold text-white">{formatStr(d.fleetSize)} vessels</span></div>
+          <div><span className="text-[#555] block mb-0.5">Reference</span><span className="font-semibold text-white">{formatBool(d.hasReference)}</span></div>
+          <div className="col-span-2"><span className="text-[#555] block mb-0.5">Legal Documents</span><span className="font-semibold text-[#ccc]">{formatStr(d.legalDocuments)}</span></div>
+          <div className="col-span-2"><span className="text-[#555] block mb-0.5">Technical Documents</span><span className="font-semibold text-[#ccc]">{formatStr(d.technicalDocuments)}</span></div>
+        </div>
+      </div>
+    );
+  }
+
+  const r = input as RepeatedCustomerInput;
+  return (
+    <div className="bg-[#11111a] rounded-lg p-4 mt-4 border border-[#2a2a3a]">
+      <h4 className="text-[10px] font-bold text-[#888] uppercase tracking-widest mb-3">Raw Imported Data</h4>
+      <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-5 gap-y-3 gap-x-4 text-xs">
+        <div><span className="text-[#555] block mb-0.5">Profit Margin</span><span className="font-semibold text-white">{formatPercent(r.margin)}</span></div>
+        <div><span className="text-[#555] block mb-0.5">Kontribusi Omset</span><span className="font-semibold text-white">{formatPercent(r.kontribusiOmset)}</span></div>
+        <div><span className="text-[#555] block mb-0.5">Fleet Size</span><span className="font-semibold text-white">{formatStr(r.fleetSize)} vessels</span></div>
+        <div><span className="text-[#555] block mb-0.5">Kerjasama</span><span className="font-semibold text-white">{formatStr(r.lamaKerjasama)} tahun</span></div>
+        <div><span className="text-[#555] block mb-0.5">Referral</span><span className="font-semibold text-white">{formatBool(r.hasReferral)}</span></div>
+        
+        <div><span className="text-[#555] block mb-0.5">Ketepatan Bayar</span><span className="font-semibold text-white">{r.ketepatanBayarHari !== undefined && r.ketepatanBayarHari !== null ? `${r.ketepatanBayarHari} hari telat` : '-'}</span></div>
+        <div><span className="text-[#555] block mb-0.5">Revisi Invoice</span><span className="font-semibold text-white">{formatStr(r.revisiInvoice)} kali</span></div>
+        <div><span className="text-[#555] block mb-0.5">Penagihan</span><span className="font-semibold text-white">{formatStr(r.penagihanCount)} kali</span></div>
+        <div><span className="text-[#555] block mb-0.5">Cancel Order</span><span className="font-semibold text-white">{formatStr(r.cancelOrder)} kali</span></div>
+        <div><span className="text-[#555] block mb-0.5">Schedule Variance</span><span className="font-semibold text-white">{r.scheduleVariance !== undefined && r.scheduleVariance !== null ? `${r.scheduleVariance} hari` : '-'}</span></div>
+        
+        <div><span className="text-[#555] block mb-0.5">Konflik QC</span><span className="font-semibold text-white">{formatStr(r.konflikQC)} kali</span></div>
+        <div><span className="text-[#555] block mb-0.5">Intervensi</span><span className="font-semibold text-white">{formatStr(r.intervensi)} kali</span></div>
+        <div><span className="text-[#555] block mb-0.5">Claim Count</span><span className="font-semibold text-white">{formatStr(r.claimCount)} kali</span></div>
+        <div><span className="text-[#555] block mb-0.5">Komunikasi PIC</span><span className="font-semibold text-white">{formatStr(r.komunikasiPIC)}</span></div>
+      </div>
+    </div>
+  );
+}
 
 function ScoreBar({ label, score, max = 5 }: { label: string; score: number; max?: number }) {
   const pct = (score / max) * 100;
@@ -48,7 +101,28 @@ function TrendIndicator({ current, previous }: { current: number; previous: numb
 
 export default function CompanyDetailPage() {
   const params = useParams();
+  const [companies, setCompanies] = useState<Company[]>([]);
+  const [mounted, setMounted] = useState(false);
+  const [editingAssessment, setEditingAssessment] = useState<{ data: NewAssessment | RepeatedAssessment; type: 'NEW' | 'REPEATED' } | null>(null);
+
+  const refreshData = () => setCompanies(getCompanies());
+
+  useEffect(() => {
+    setCompanies(getCompanies());
+    setMounted(true);
+  }, []);
+
+  if (!mounted) return null;
+
   const company = companies.find(c => c.id === params.id);
+
+  const handleDeleteAssessment = (assessmentId: string, type: 'NEW' | 'REPEATED') => {
+    const msg = `Hapus assessment ini? Data tidak bisa dikembalikan.`;
+    if (window.confirm(msg)) {
+      deleteAssessment(company!.id, assessmentId, type);
+      refreshData();
+    }
+  };
 
   if (!company) {
     return (
@@ -79,6 +153,15 @@ export default function CompanyDetailPage() {
 
   return (
     <div className="space-y-8 relative">
+      {editingAssessment && company && (
+        <EditAssessmentModal
+          companyId={company.id}
+          assessment={editingAssessment.data}
+          type={editingAssessment.type}
+          onClose={() => setEditingAssessment(null)}
+          onSaved={refreshData}
+        />
+      )}
       <div className="fixed top-20 right-20 w-80 h-80 bg-blue-500/[0.03] rounded-full blur-[120px] pointer-events-none" />
 
       {/* Back + Header */}
@@ -281,9 +364,23 @@ export default function CompanyDetailPage() {
                         <div className="mt-1">
                           <LevelBadge level={isNew ? (assessment.data as NewAssessment).scores.level : (assessment.data as RepeatedAssessment).scores.level} />
                         </div>
-                        <button onClick={() => exportAssessmentPDF(company, assessment.data as NewAssessment | RepeatedAssessment, assessment.type)} className="inline-flex items-center gap-1 px-2 py-1 rounded-md text-[10px] font-semibold border border-[#2a2a3a] text-[#666] hover:text-blue-400 hover:border-blue-500/30 transition-all">
-                          <Download className="w-3 h-3" /> PDF
-                        </button>
+                        <div className="flex items-center gap-1.5 mt-1">
+                          <button
+                            onClick={() => setEditingAssessment({ data: assessment.data, type: assessment.type })}
+                            className="inline-flex items-center gap-1 px-2 py-1 rounded-md text-[10px] font-semibold border border-blue-500/20 text-blue-400 hover:bg-blue-500/20 transition-all"
+                          >
+                            <Edit2 className="w-3 h-3" /> Edit
+                          </button>
+                          <button
+                            onClick={() => handleDeleteAssessment(assessment.data.id, assessment.type)}
+                            className="inline-flex items-center gap-1 px-2 py-1 rounded-md text-[10px] font-semibold border border-red-500/20 text-red-400 hover:bg-red-500/20 transition-all"
+                          >
+                            <Trash2 className="w-3 h-3" /> Hapus
+                          </button>
+                          <button onClick={() => exportAssessmentPDF(company, assessment.data as NewAssessment | RepeatedAssessment, assessment.type)} className="inline-flex items-center gap-1 px-2 py-1 rounded-md text-[10px] font-semibold border border-[#2a2a3a] text-[#666] hover:text-blue-400 hover:border-blue-500/30 transition-all">
+                            <Download className="w-3 h-3" /> PDF
+                          </button>
+                        </div>
                       </div>
                     </div>
 
@@ -361,6 +458,9 @@ export default function CompanyDetailPage() {
                         <p className="text-xs text-[#666] italic">💬 {isNew ? (assessment.data as NewAssessment).notes : (assessment.data as RepeatedAssessment).notes}</p>
                       </div>
                     )}
+
+                    {/* Raw Input Details */}
+                    <RawDataViewer input={assessment.data.input} type={assessment.type} />
                   </div>
                 </div>
               );

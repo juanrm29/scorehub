@@ -3,7 +3,8 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { useRouter } from 'next/navigation';
 import { motion, AnimatePresence } from 'framer-motion';
-import { companies } from '@/lib/data';
+import { getCompanies } from '@/lib/store';
+import { Company } from '@/lib/types';
 import { getCompanyStatus, getCompanyCurrentScore, getCompanyCurrentLevel, getLevelColor, getLevelEmoji } from '@/lib/scoring';
 import {
   Search, Command, CornerDownLeft, ArrowUp, ArrowDown,
@@ -27,7 +28,7 @@ interface SearchResult {
 }
 
 // ==================== BUILD INDEX ====================
-function buildSearchIndex(): SearchResult[] {
+function buildSearchIndex(companies: Company[]): SearchResult[] {
   const results: SearchResult[] = [];
 
   // Pages
@@ -131,12 +132,17 @@ function fuzzyMatch(text: string, query: string): { match: boolean; score: numbe
 export function CommandPalette() {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState('');
+  const [companies, setCompanies] = useState<Company[]>([]);
   const [activeIndex, setActiveIndex] = useState(0);
   const inputRef = useRef<HTMLInputElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
   const router = useRouter();
 
-  const index = useMemo(() => buildSearchIndex(), []);
+  useEffect(() => {
+    setCompanies(getCompanies());
+  }, []);
+
+  const index = useMemo(() => buildSearchIndex(companies), [companies]);
 
   // Filter & rank results
   const results = useMemo(() => {

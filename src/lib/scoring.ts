@@ -93,33 +93,57 @@ export function scoreBackgroundMedia(media: string): number {
 }
 
 export function calculateNewCustomer(input: NewCustomerInput): NewCustomerScores {
-  // Commercial Potential (50%) — sub-weights: Estimasi 40%, Fleet 20%, Term 40%
-  const fleetScore = scoreFleetSize(input.fleetSize);
-  const valueScore = scoreEstimatedValue(input.estimatedValue);
-  const termPaymentScore = scoreTermPayment(input.termPayment);
-  const commercialPotentialAvg = (valueScore * 40 + fleetScore * 20 + termPaymentScore * 40) / 100;
+  // Commercial Potential (50%)
+  const fleetScore = input.fleetSize != null ? scoreFleetSize(input.fleetSize) : undefined;
+  const valueScore = input.estimatedValue != null ? scoreEstimatedValue(input.estimatedValue) : undefined;
+  const termPaymentScore = input.termPayment != null ? scoreTermPayment(input.termPayment) : undefined;
+  const commercialPotentialAvg = calcDynamicAverage([
+    { score: valueScore, weight: 40 },
+    { score: fleetScore, weight: 20 },
+    { score: termPaymentScore, weight: 40 }
+  ]);
   const commercialPotentialWeighted = commercialPotentialAvg * 0.5;
 
-  // Credibility (30%) — sub-weights: Legal 50%, Background 50% (Reference is informational only)
-  const legalScore = scoreLegalDocuments(input.legalDocuments);
-  const backgroundScore = scoreBackgroundMedia(input.backgroundMedia);
-  const referenceScore = input.hasReference ? 5 : 2;
-  const credibilityAvg = (legalScore * 50 + backgroundScore * 50) / 100;
+  // Credibility (30%)
+  const legalScore = input.legalDocuments != null ? scoreLegalDocuments(input.legalDocuments) : undefined;
+  const backgroundScore = input.backgroundMedia != null ? scoreBackgroundMedia(input.backgroundMedia) : undefined;
+  const referenceScore = input.hasReference != null ? (input.hasReference ? 5 : 2) : undefined;
+  const credibilityAvg = calcDynamicAverage([
+    { score: legalScore, weight: 50 },
+    { score: backgroundScore, weight: 50 }
+  ]);
   const credibilityWeighted = credibilityAvg * 0.3;
 
   // Technical Clarity (20%)
-  const technicalScore = scoreTechnicalDocuments(input.technicalDocuments);
-  const decisionSpeedScore = clamp(input.decisionSpeed, 1, 5);
-  const technicalClarityAvg = (technicalScore + decisionSpeedScore) / 2;
+  const technicalScore = input.technicalDocuments != null ? scoreTechnicalDocuments(input.technicalDocuments) : undefined;
+  const decisionSpeedScore = input.decisionSpeed != null ? clamp(input.decisionSpeed, 1, 5) : undefined;
+  const technicalClarityAvg = calcDynamicAverage([
+    { score: technicalScore, weight: 50 },
+    { score: decisionSpeedScore, weight: 50 }
+  ]);
   const technicalClarityWeighted = technicalClarityAvg * 0.2;
 
-  const totalScore = Math.round((commercialPotentialWeighted + credibilityWeighted + technicalClarityWeighted) * 100) / 100;
+  const categoryAverages = calcDynamicAverage([
+    { score: commercialPotentialAvg > 0 ? commercialPotentialAvg : undefined, weight: 50 },
+    { score: credibilityAvg > 0 ? credibilityAvg : undefined, weight: 30 },
+    { score: technicalClarityAvg > 0 ? technicalClarityAvg : undefined, weight: 20 }
+  ]);
+
+  const totalScore = Math.round(categoryAverages * 100) / 100;
   const level = getLevel(totalScore);
 
   return {
-    fleetScore, valueScore, termPaymentScore, commercialPotentialAvg, commercialPotentialWeighted,
-    legalScore, backgroundScore, referenceScore, credibilityAvg, credibilityWeighted,
-    technicalScore, decisionSpeedScore, technicalClarityAvg, technicalClarityWeighted,
+    fleetScore: fleetScore || 0, 
+    valueScore: valueScore || 0, 
+    termPaymentScore: termPaymentScore || 0, 
+    commercialPotentialAvg, commercialPotentialWeighted,
+    legalScore: legalScore || 0, 
+    backgroundScore: backgroundScore || 0, 
+    referenceScore: referenceScore || 0, 
+    credibilityAvg, credibilityWeighted,
+    technicalScore: technicalScore || 0, 
+    decisionSpeedScore: decisionSpeedScore || 0, 
+    technicalClarityAvg, technicalClarityWeighted,
     totalScore, level,
   };
 }
@@ -227,50 +251,110 @@ export function scoreReferral(has: boolean): number {
   return has ? 5 : 1;
 }
 
+export interface WeightedScore {
+  score: number | undefined;
+  weight: number;
+}
+
+export function calcDynamicAverage(scores: WeightedScore[]): number {
+  let totalScore = 0;
+  let totalWeight = 0;
+  for (const s of scores) {
+    if (s.score !== undefined && s.score !== null && !isNaN(s.score)) {
+      totalScore += s.score * s.weight;
+      totalWeight += s.weight;
+    }
+  }
+  if (totalWeight === 0) return 0;
+  return totalScore / totalWeight;
+}
+
 export function calculateRepeatedCustomer(input: RepeatedCustomerInput): RepeatedCustomerScores {
   // Revenue Contribution (30%)
-  const kontribusiOmsetScore = scoreKontribusiOmset(input.kontribusiOmset);
-  const marginScore = scoreMargin(input.margin);
-  const revenueAvg = (kontribusiOmsetScore + marginScore) / 2;
+  const kontribusiOmsetScore = input.kontribusiOmset != null ? scoreKontribusiOmset(input.kontribusiOmset) : undefined;
+  const marginScore = input.margin != null ? scoreMargin(input.margin) : undefined;
+  const revenueAvg = calcDynamicAverage([
+    { score: kontribusiOmsetScore, weight: 50 },
+    { score: marginScore, weight: 50 }
+  ]);
   const revenueWeighted = revenueAvg * 0.3;
 
-  // Payment Behaviour (30%) — sub-weights: Ketepatan 50%, Revisi 30%, Penagihan 20%
-  const ketepatanBayarScore = scoreKetepatanBayar(input.ketepatanBayarHari);
-  const revisiInvoiceScore = scoreRevisiInvoice(input.revisiInvoice);
-  const penagihanScore = scorePenagihan(input.penagihanCount);
-  const paymentAvg = (ketepatanBayarScore * 50 + revisiInvoiceScore * 30 + penagihanScore * 20) / 100;
+  // Payment Behaviour (30%)
+  const ketepatanBayarScore = input.ketepatanBayarHari != null ? scoreKetepatanBayar(input.ketepatanBayarHari) : undefined;
+  const revisiInvoiceScore = input.revisiInvoice != null ? scoreRevisiInvoice(input.revisiInvoice) : undefined;
+  const penagihanScore = input.penagihanCount != null ? scorePenagihan(input.penagihanCount) : undefined;
+  const paymentAvg = calcDynamicAverage([
+    { score: ketepatanBayarScore, weight: 50 },
+    { score: revisiInvoiceScore, weight: 30 },
+    { score: penagihanScore, weight: 20 }
+  ]);
   const paymentWeighted = paymentAvg * 0.3;
 
-  // Operational Behaviour (15%) — sub-weights: Cancel 30%, Schedule 30%, QC 20%, Intervensi 20%
-  const cancelOrderScore = scoreCancelOrder(input.cancelOrder);
-  const scheduleVarianceScore = scoreScheduleVariance(input.scheduleVariance);
-  const konflikQCScore = scoreKonflikQC(input.konflikQC);
-  const intervensiScore = scoreIntervensi(input.intervensi);
-  const operationalAvg = (cancelOrderScore * 30 + scheduleVarianceScore * 30 + konflikQCScore * 20 + intervensiScore * 20) / 100;
+  // Operational Behaviour (15%)
+  const cancelOrderScore = input.cancelOrder != null ? scoreCancelOrder(input.cancelOrder) : undefined;
+  const scheduleVarianceScore = input.scheduleVariance != null ? scoreScheduleVariance(input.scheduleVariance) : undefined;
+  const konflikQCScore = input.konflikQC != null ? scoreKonflikQC(input.konflikQC) : undefined;
+  const intervensiScore = input.intervensi != null ? scoreIntervensi(input.intervensi) : undefined;
+  const operationalAvg = calcDynamicAverage([
+    { score: cancelOrderScore, weight: 30 },
+    { score: scheduleVarianceScore, weight: 30 },
+    { score: konflikQCScore, weight: 20 },
+    { score: intervensiScore, weight: 20 }
+  ]);
   const operationalWeighted = operationalAvg * 0.15;
 
   // Relationship Quality (15%)
-  const komunikasiScore = scoreKomunikasiPIC(input.komunikasiPIC);
-  const claimScore = scoreClaimCount(input.claimCount);
-  const relationshipAvg = (komunikasiScore + claimScore) / 2;
+  const komunikasiScore = input.komunikasiPIC != null ? scoreKomunikasiPIC(input.komunikasiPIC) : undefined;
+  const claimScore = input.claimCount != null ? scoreClaimCount(input.claimCount) : undefined;
+  const relationshipAvg = calcDynamicAverage([
+    { score: komunikasiScore, weight: 50 },
+    { score: claimScore, weight: 50 }
+  ]);
   const relationshipWeighted = relationshipAvg * 0.15;
 
-  // Value Customer (10%) — sub-weights: Lama 40%, Fleet 40%, Referral 20%
-  const lamaKerjasamaScore = scoreLamaKerjasama(input.lamaKerjasama);
-  const fleetScore = scoreFleetSize(input.fleetSize);
-  const referralScore = scoreReferral(input.hasReferral);
-  const valueAvg = (lamaKerjasamaScore * 40 + fleetScore * 40 + referralScore * 20) / 100;
+  // Value Customer (10%)
+  const lamaKerjasamaScore = input.lamaKerjasama != null ? scoreLamaKerjasama(input.lamaKerjasama) : undefined;
+  const fleetScore = input.fleetSize != null ? scoreFleetSize(input.fleetSize) : undefined;
+  const referralScore = input.hasReferral != null ? scoreReferral(input.hasReferral) : undefined;
+  const valueAvg = calcDynamicAverage([
+    { score: lamaKerjasamaScore, weight: 40 },
+    { score: fleetScore, weight: 40 },
+    { score: referralScore, weight: 20 }
+  ]);
   const valueWeighted = valueAvg * 0.1;
 
-  const totalScore = Math.round((revenueWeighted + paymentWeighted + operationalWeighted + relationshipWeighted + valueWeighted) * 100) / 100;
+  // Calculate final score dynamically based on available categories
+  const categoryAverages = calcDynamicAverage([
+    { score: revenueAvg > 0 ? revenueAvg : undefined, weight: 30 },
+    { score: paymentAvg > 0 ? paymentAvg : undefined, weight: 30 },
+    { score: operationalAvg > 0 ? operationalAvg : undefined, weight: 15 },
+    { score: relationshipAvg > 0 ? relationshipAvg : undefined, weight: 15 },
+    { score: valueAvg > 0 ? valueAvg : undefined, weight: 10 }
+  ]);
+  
+  const totalScore = Math.round(categoryAverages * 100) / 100;
   const level = getLevel(totalScore);
 
   return {
-    kontribusiOmsetScore, marginScore, revenueAvg, revenueWeighted,
-    ketepatanBayarScore, revisiInvoiceScore, penagihanScore, paymentAvg, paymentWeighted,
-    cancelOrderScore, scheduleVarianceScore, konflikQCScore, intervensiScore, operationalAvg, operationalWeighted,
-    komunikasiScore, claimScore, relationshipAvg, relationshipWeighted,
-    lamaKerjasamaScore, fleetScore, referralScore, valueAvg, valueWeighted,
+    kontribusiOmsetScore: kontribusiOmsetScore || 0, 
+    marginScore: marginScore || 0, 
+    revenueAvg, revenueWeighted,
+    ketepatanBayarScore: ketepatanBayarScore || 0, 
+    revisiInvoiceScore: revisiInvoiceScore || 0, 
+    penagihanScore: penagihanScore || 0, 
+    paymentAvg, paymentWeighted,
+    cancelOrderScore: cancelOrderScore || 0, 
+    scheduleVarianceScore: scheduleVarianceScore || 0, 
+    konflikQCScore: konflikQCScore || 0, 
+    intervensiScore: intervensiScore || 0, 
+    operationalAvg, operationalWeighted,
+    komunikasiScore: komunikasiScore || 0, 
+    claimScore: claimScore || 0, 
+    relationshipAvg, relationshipWeighted,
+    lamaKerjasamaScore: lamaKerjasamaScore || 0, 
+    fleetScore: fleetScore || 0, 
+    referralScore: referralScore || 0, 
+    valueAvg, valueWeighted,
     totalScore, level,
   };
 }
@@ -301,7 +385,22 @@ export const LEVEL_THRESHOLDS = [
 const THREE_YEARS_MS = 3 * 365.25 * 24 * 60 * 60 * 1000;
 
 export function getCompanyStatus(company: Company, referenceDate: Date = new Date()): CompanyStatus {
-  if (company.repeatedAssessments.length === 0) return 'NEW_ONLY';
+  // STATUS logic:
+  // - NEW_ONLY  : company has only 1 deal/project (0 or 1 repeated assessment)
+  //               Even if they have a Repeated (lanjutan) for that 1 project, status is still NEW
+  // - ACTIVE_REPEATED : company has had 2+ deals/projects (2+ repeated assessments)
+  // - LAPSED    : last deal was > 3 years ago
+
+  const repCount = company.repeatedAssessments.length;
+
+  // No repeated assessment at all → NEW_ONLY (pre-judgement only, not yet completed a project)
+  if (repCount === 0) return 'NEW_ONLY';
+
+  // Only 1 repeated assessment (= 1 project completed) → still NEW_ONLY
+  // because they haven't established a recurring relationship yet
+  if (repCount === 1) return 'NEW_ONLY';
+
+  // 2+ repeated assessments → check lapse
   const lastDeal = company.lastDealDate ? new Date(company.lastDealDate) : null;
   if (!lastDeal) return 'NEW_ONLY';
   const elapsed = referenceDate.getTime() - lastDeal.getTime();
@@ -311,10 +410,13 @@ export function getCompanyStatus(company: Company, referenceDate: Date = new Dat
 
 export function getCompanyCurrentScore(company: Company): number {
   const status = getCompanyStatus(company);
-  if (status === 'ACTIVE_REPEATED' && company.repeatedAssessments.length > 0) {
+  // Always prefer the latest Repeated assessment score if available,
+  // because it reflects actual project performance (more accurate than pre-judgement)
+  if (company.repeatedAssessments.length > 0) {
     const sorted = [...company.repeatedAssessments].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
     return sorted[0].scores.totalScore;
   }
+  // Fall back to New (pre-judgement) score if no repeated yet
   if (company.newAssessments.length > 0) {
     const sorted = [...company.newAssessments].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
     return sorted[0].scores.totalScore;

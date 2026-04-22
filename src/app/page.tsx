@@ -3,7 +3,8 @@
 import Link from 'next/link';
 import { useEffect, useState } from 'react';
 import { motion } from 'framer-motion';
-import { companies } from '@/lib/data';
+import { getCompanies } from '@/lib/store';
+import { Company } from '@/lib/types';
 import { getCompanyStatus, getCompanyCurrentScore, getCompanyCurrentLevel, getLevelColor, getLevelEmoji, yearsUntilLapse, calculateLTV, calculateChurnRisk } from '@/lib/scoring';
 import { LevelBadge } from '@/components/LevelBadge';
 import { LTVForecastChart } from '@/components/LTVForecastChart';
@@ -147,7 +148,7 @@ function HexStat({ value, label, sub, color, icon: Icon, delay = 0 }: { value: s
 }
 
 // ==================== ANALYTICS ====================
-function useAnalytics() {
+function useAnalytics(companies: Company[]) {
   const enriched = companies.map(c => ({
     ...c,
     status: getCompanyStatus(c),
@@ -243,9 +244,15 @@ function useAnalytics() {
 
 // ==================== MAIN DASHBOARD ====================
 export default function Dashboard() {
-  const a = useAnalytics();
+  const [companies, setCompanies] = useState<Company[]>([]);
   const [mounted, setMounted] = useState(false);
-  useEffect(() => setMounted(true), []);
+
+  useEffect(() => {
+    setCompanies(getCompanies());
+    setMounted(true);
+  }, []);
+
+  const a = useAnalytics(companies);
 
   const healthScore = a.total > 0 ? Math.round(
     (a.byLevel.STRATEGIC * 100 + a.byLevel.PREFERRED * 75 + a.byLevel.REGULAR * 40 + a.byLevel.HIGH_RISK * 10) / a.total

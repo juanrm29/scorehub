@@ -2,24 +2,22 @@
 
 import { Company, NewAssessment, RepeatedAssessment } from './types';
 import { companies as staticCompanies } from './data';
-import { calculateNewCustomer, calculateRepeatedCustomer } from './scoring';
+import { calculateNewCustomer, calculateRepeatedCustomer, getCompanyStatus } from './scoring';
 
 const STORAGE_KEY = 'scorehub_companies';
 
-// Deep clone static data and merge with localStorage
+// Initialize or get companies
 export function getCompanies(): Company[] {
   if (typeof window === 'undefined') return structuredClone(staticCompanies);
 
   const stored = localStorage.getItem(STORAGE_KEY);
-  if (!stored) return structuredClone(staticCompanies);
+  if (!stored) {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(staticCompanies));
+    return structuredClone(staticCompanies);
+  }
 
   try {
-    const parsed = JSON.parse(stored) as Company[];
-    // Merge: start from static, overlay stored additions
-    const map = new Map<string, Company>();
-    staticCompanies.forEach(c => map.set(c.id, structuredClone(c)));
-    parsed.forEach(c => map.set(c.id, c));
-    return Array.from(map.values());
+    return JSON.parse(stored) as Company[];
   } catch {
     return structuredClone(staticCompanies);
   }
@@ -107,9 +105,81 @@ export function addRepeatedAssessment(
   return assessment;
 }
 
+// Update an existing New Assessment
+export function updateNewAssessment(
+  companyId: string,
+  assessmentId: string,
+  input: Parameters<typeof calculateNewCustomer>[0],
+  notes?: string,
+): NewAssessment {
+  const all = getCompanies();
+  const company = all.find(c => c.id === companyId);
+  if (!company) throw new Error('Company not found');
+  const idx = company.newAssessments.findIndex(a => a.id === assessmentId);
+  if (idx === -1) throw new Error('Assessment not found');
+
+  const scores = calculateNewCustomer(input);
+  company.newAssessments[idx] = { ...company.newAssessments[idx], input, scores, notes };
+  save(all);
+  return company.newAssessments[idx];
+}
+
+// Update an existing Repeated Assessment
+export function updateRepeatedAssessment(
+  companyId: string,
+  assessmentId: string,
+  projectName: string,
+  periodStart: string,
+  periodEnd: string,
+  input: Parameters<typeof calculateRepeatedCustomer>[0],
+  notes?: string,
+): RepeatedAssessment {
+  const all = getCompanies();
+  const company = all.find(c => c.id === companyId);
+  if (!company) throw new Error('Company not found');
+  const idx = company.repeatedAssessments.findIndex(a => a.id === assessmentId);
+  if (idx === -1) throw new Error('Assessment not found');
+
+  const scores = calculateRepeatedCustomer(input);
+  company.repeatedAssessments[idx] = { ...company.repeatedAssessments[idx], projectName, periodStart, periodEnd, input, scores, notes };
+  save(all);
+  return company.repeatedAssessments[idx];
+}
+
+// Delete a single assessment
+export function deleteAssessment(companyId: string, assessmentId: string, type: 'NEW' | 'REPEATED') {
+  const all = getCompanies();
+  const company = all.find(c => c.id === companyId);
+  if (!company) return;
+  if (type === 'NEW') {
+    company.newAssessments = company.newAssessments.filter(a => a.id !== assessmentId);
+  } else {
+    company.repeatedAssessments = company.repeatedAssessments.filter(a => a.id !== assessmentId);
+    // Update lastDealDate
+    const sorted = [...company.repeatedAssessments].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+    company.lastDealDate = sorted[0]?.date ?? null;
+  }
+  save(all);
+}
+
 // Reset to static data
 export function resetData() {
   if (typeof window !== 'undefined') {
     localStorage.removeItem(STORAGE_KEY);
   }
+}
+
+// Delete companies by category or all
+export function deleteCompanies(category: 'ALL' | 'NEW_ONLY' | 'ACTIVE_REPEATED' | 'LAPSED') {
+  if (category === 'ALL') {
+    save([]); // Completely empty
+    return;
+  }
+
+  const all = getCompanies();
+  const filtered = all.filter(c => {
+    const status = getCompanyStatus(c);
+    return status !== category; // keep those that DO NOT match the category
+  });
+  save(filtered);
 }
