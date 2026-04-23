@@ -95,7 +95,10 @@ export function scoreTechnicalDocuments(docs: string): number {
   if (docSet.length >= 3) return 5;
   if (docSet.length >= 2) return 4;
   if (docSet.length >= 1) return 3;
-  return 1;
+  // BUG-02 FIX: score 2 was missing. 0 docs = HIGH_RISK input. Score 1 reserved
+  // for completely absent technical documentation (undefined/skipped).
+  // When explicitly provided as empty string, give score 2 (bare minimum signal).
+  return 2;
 }
 
 export function scoreBackgroundMedia(media: string): number {
@@ -424,7 +427,13 @@ export function getCompanyStatus(company: Company, referenceDate: Date = new Dat
   if (repCount === 1) return 'NEW_ONLY';
 
   // 2+ repeated assessments → check lapse
-  const lastDeal = company.lastDealDate ? new Date(company.lastDealDate) : null;
+  // BUG-08 FIX: derive lastDealDate from sorted assessments if the stored value is null
+  let lastDealStr = company.lastDealDate;
+  if (!lastDealStr) {
+    const sorted = [...company.repeatedAssessments].sort((a, b) => b.date.localeCompare(a.date));
+    lastDealStr = sorted[0]?.date ?? null;
+  }
+  const lastDeal = lastDealStr ? new Date(lastDealStr) : null;
   if (!lastDeal) return 'NEW_ONLY';
   const elapsed = referenceDate.getTime() - lastDeal.getTime();
   if (elapsed > THREE_YEARS_MS) return 'LAPSED';
@@ -432,17 +441,21 @@ export function getCompanyStatus(company: Company, referenceDate: Date = new Dat
 }
 
 export function getCompanyCurrentScore(company: Company): number {
-  const status = getCompanyStatus(company);
+  // BUG-01 / PERF-01 FIX: avoid creating a full clone + sorting on every call.
+  // Use a single-pass max-date scan instead of [...arr].sort()
+  const getLatest = <T extends { date: string }>(arr: T[]): T | undefined => {
+    if (arr.length === 0) return undefined;
+    return arr.reduce((best, cur) => (cur.date > best.date ? cur : best));
+  };
+
   // Always prefer the latest Repeated assessment score if available,
   // because it reflects actual project performance (more accurate than pre-judgement)
   if (company.repeatedAssessments.length > 0) {
-    const sorted = [...company.repeatedAssessments].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
-    return sorted[0].scores.totalScore;
+    return getLatest(company.repeatedAssessments)!.scores.totalScore;
   }
   // Fall back to New (pre-judgement) score if no repeated yet
   if (company.newAssessments.length > 0) {
-    const sorted = [...company.newAssessments].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
-    return sorted[0].scores.totalScore;
+    return getLatest(company.newAssessments)!.scores.totalScore;
   }
   return 0;
 }

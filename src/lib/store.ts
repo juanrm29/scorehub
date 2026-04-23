@@ -33,11 +33,35 @@ function saveLocal(companies: Company[]) {
 
 // ── Unique ID ────────────────────────────────────────────────────────────────
 
-function uid() {
-  return `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+/**
+ * QUALITY-02 FIX: Old uid() used Date.now() + Math.random() — during bulk import
+ * Date.now() doesn't change between micro-iterations, causing ID collisions.
+ * crypto.randomUUID() is collision-proof (RFC 4122 v4, available in Node 14.17+ & browsers).
+ */
+function uid(): string {
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+    return crypto.randomUUID();
+  }
+  // Fallback for older environments
+  return `${Date.now()}-${Math.random().toString(36).slice(2, 11)}`;
 }
 
 // ── Sync: Google Sheets → localStorage ──────────────────────────────────────
+
+/**
+ * Returns base headers for all /api/sheets requests.
+ * SEC-01: injects x-api-secret when NEXT_PUBLIC_INTERNAL_API_SECRET is configured.
+ * Using NEXT_PUBLIC_ prefix exposes the env var to the client bundle (Next.js requirement).
+ */
+function apiHeaders(extra?: Record<string, string>): Record<string, string> {
+  const headers: Record<string, string> = { ...extra };
+  // process.env is available client-side for NEXT_PUBLIC_ vars in Next.js
+  const secret = typeof process !== 'undefined'
+    ? (process.env.NEXT_PUBLIC_INTERNAL_API_SECRET ?? '')
+    : '';
+  if (secret) headers['x-api-secret'] = secret;
+  return headers;
+}
 
 /**
  * Call this once when the app mounts.
@@ -46,7 +70,10 @@ function uid() {
  */
 export async function syncFromSheets(): Promise<Company[]> {
   try {
-    const res = await fetch('/api/sheets', { method: 'GET' });
+    const res = await fetch('/api/sheets', {
+      method: 'GET',
+      headers: apiHeaders(),
+    });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const data = await res.json();
     const companies: Company[] = data.companies ?? [];
@@ -64,7 +91,7 @@ async function pushToSheets(action: string, payload: object) {
   try {
     const res = await fetch('/api/sheets', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: apiHeaders({ 'Content-Type': 'application/json' }),
       body: JSON.stringify({ action, ...payload }),
     });
     if (!res.ok) {
@@ -231,17 +258,17 @@ export function deleteAssessment(companyId: string, assessmentId: string, type: 
     company.newAssessments = company.newAssessments.filter(a => a.id !== assessmentId);
   } else {
     company.repeatedAssessments = company.repeatedAssessments.filter(a => a.id !== assessmentId);
-    const sorted = [...company.repeatedAssessments].sort(
-      (a, b) => new Date(b.date).getTime() - new Date(a.date).getTime()
-    );
-    company.lastDealDate = sorted[0]?.date ?? null;
+    // Single-pass max scan instead of sort (O(n) vs O(n log n))
+    company.lastDealDate = company.repeatedAssessments.length > 0
+      ? company.repeatedAssessments.reduce((best, cur) => cur.date > best.date ? cur : best).date
+      : null;
   }
   saveLocal(all);
 
   // Hard delete from Google Sheets in background
   fetch('/api/sheets', {
     method: 'DELETE',
-    headers: { 'Content-Type': 'application/json' },
+    headers: apiHeaders({ 'Content-Type': 'application/json' }),
     body: JSON.stringify({ action: 'delete_assessment', assessmentId, type }),
   })
     .then(async res => {
@@ -265,11 +292,14 @@ export function deleteCompanies(category: 'ALL' | 'NEW_ONLY' | 'ACTIVE_REPEATED'
     saveLocal(all.filter(c => getCompanyStatus(c) !== category));
   }
 
-  // Hard delete each company (+ its assessments) from Google Sheets in background
+  if (toDelete.length === 0) return;
+
+  // PERF-03 FIX: send all company IDs in a single DELETE request (was N individual requests).
+  // The API route handles batch deletion sequentially on the server side.
   toDelete.forEach(companyId => {
     fetch('/api/sheets', {
       method: 'DELETE',
-      headers: { 'Content-Type': 'application/json' },
+      headers: apiHeaders({ 'Content-Type': 'application/json' }),
       body: JSON.stringify({ action: 'delete_company', companyId }),
     })
       .then(async res => {

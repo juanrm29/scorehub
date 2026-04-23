@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { motion } from 'framer-motion';
 import { getCompanies, syncFromSheets } from '@/lib/store';
 import { Company } from '@/lib/types';
@@ -149,97 +149,125 @@ function HexStat({ value, label, sub, color, icon: Icon, delay = 0 }: { value: s
 
 // ==================== ANALYTICS ====================
 function useAnalytics(companies: Company[]) {
-  const enriched = companies.map(c => ({
-    ...c,
-    status: getCompanyStatus(c),
-    score: getCompanyCurrentScore(c),
-    level: getCompanyCurrentLevel(c),
-    yrsLapse: yearsUntilLapse(c),
-    totalAssessments: c.newAssessments.length + c.repeatedAssessments.length,
-    hasImproved: c.repeatedAssessments.length >= 2
-      ? c.repeatedAssessments[c.repeatedAssessments.length - 1].scores.totalScore >
-        c.repeatedAssessments[c.repeatedAssessments.length - 2].scores.totalScore
-      : null,
-    latestRepScores: c.repeatedAssessments.length > 0 ? c.repeatedAssessments[c.repeatedAssessments.length - 1].scores : null,
-    ltv: calculateLTV(c),
-    churnRisk: calculateChurnRisk(c),
-    zScore: 0,
-  }));
+  // PERF-02 FIX: memoize all analytics computation — only recalculates when
+  // companies array reference changes (after syncFromSheets or user actions).
+  return useMemo(() => {
+    // Helper: get the latest assessment by date without sorting the whole array (O(n) vs O(n log n))
+    const latestByDate = <T extends { date: string }>(arr: T[]): T | undefined =>
+      arr.length === 0 ? undefined : arr.reduce((best, cur) => (cur.date > best.date ? cur : best));
 
-  const total = enriched.length;
-  const avgScore = enriched.reduce((a, c) => a + c.score, 0) / (total || 1);
-  const stdDev = Math.sqrt(enriched.reduce((acc, c) => acc + Math.pow(c.score - avgScore, 2), 0) / (total || 1));
-  
-  // Assign Z-Score
-  enriched.forEach(c => {
-    c.zScore = stdDev > 0 ? (c.score - avgScore) / stdDev : 0;
-  });
+    const enriched = companies.map(c => {
+      const status = getCompanyStatus(c);
+      const score = getCompanyCurrentScore(c);
+      const level = getCompanyCurrentLevel(c);
+      const yrsLapse = yearsUntilLapse(c);
 
-  const totalFleet = enriched.reduce((a, c) => a + c.fleetSize, 0);
-  const totalLTV = enriched.reduce((a, c) => a + c.ltv.ltvValue, 0);
-  const anomalies = enriched.filter(c => c.zScore <= -1.5 || (c.churnRisk.trend < 0 && c.score < 2.5));
+      // BUG-06 + correctness fix: hasImproved uses date-sorted top-2, not array position
+      // (Sheets may return rows in any order)
+      let hasImproved: boolean | null = null;
+      if (c.repeatedAssessments.length >= 2 && status === 'ACTIVE_REPEATED') {
+        const sorted2 = [...c.repeatedAssessments]
+          .sort((a, b) => b.date.localeCompare(a.date))
+          .slice(0, 2);
+        hasImproved = sorted2[0].scores.totalScore > sorted2[1].scores.totalScore;
+      }
 
-  const byLevel = { STRATEGIC: 0, PREFERRED: 0, REGULAR: 0, HIGH_RISK: 0 };
-  enriched.forEach(c => byLevel[c.level]++);
+      const latestRep = latestByDate(c.repeatedAssessments);
 
-  const byStatus = { NEW_ONLY: 0, ACTIVE_REPEATED: 0, LAPSED: 0 };
-  enriched.forEach(c => byStatus[c.status]++);
+      return {
+        ...c,
+        status,
+        score,
+        level,
+        yrsLapse,
+        totalAssessments: c.newAssessments.length + c.repeatedAssessments.length,
+        hasImproved,
+        latestRepScores: latestRep?.scores ?? null,
+        ltv: calculateLTV(c),
+        churnRisk: calculateChurnRisk(c),
+        zScore: 0,
+      };
+    });
 
-  const lapseRisk = enriched.filter(c => c.status === 'ACTIVE_REPEATED' && c.yrsLapse !== null && c.yrsLapse < 1).sort((a, b) => (a.yrsLapse ?? 99) - (b.yrsLapse ?? 99));
-  const topPerformers = [...enriched].filter(c => c.status === 'ACTIVE_REPEATED').sort((a, b) => b.score - a.score).slice(0, 5);
-  const awaitingFollowUp = enriched.filter(c => c.status === 'NEW_ONLY').sort((a, b) => b.score - a.score);
+    const total = enriched.length;
+    const avgScore = enriched.reduce((a, c) => a + c.score, 0) / (total || 1);
+    const stdDev = Math.sqrt(enriched.reduce((acc, c) => acc + Math.pow(c.score - avgScore, 2), 0) / (total || 1));
 
-  const scoreRanges = [
-    { range: '1.0-1.9', min: 1, max: 1.99, count: 0, color: '#ef4444' },
-    { range: '2.0-2.9', min: 2, max: 2.99, count: 0, color: '#f59e0b' },
-    { range: '3.0-3.4', min: 3, max: 3.49, count: 0, color: '#3b82f6' },
-    { range: '3.5-3.9', min: 3.5, max: 3.99, count: 0, color: '#6366f1' },
-    { range: '4.0-4.4', min: 4, max: 4.49, count: 0, color: '#10b981' },
-    { range: '4.5-5.0', min: 4.5, max: 5, count: 0, color: '#059669' },
-  ];
-  enriched.forEach(c => {
-    const r = scoreRanges.find(sr => c.score >= sr.min && c.score <= sr.max);
-    if (r) r.count++;
-  });
+    // Assign Z-Score
+    enriched.forEach(c => {
+      c.zScore = stdDev > 0 ? (c.score - avgScore) / stdDev : 0;
+    });
 
-  const improvingCount = enriched.filter(c => c.hasImproved === true).length;
-  const decliningCount = enriched.filter(c => c.hasImproved === false).length;
-  const stableCount = enriched.filter(c => c.status === 'ACTIVE_REPEATED').length - improvingCount - decliningCount;
+    const totalFleet = enriched.reduce((a, c) => a + c.fleetSize, 0);
+    const totalLTV = enriched.reduce((a, c) => a + c.ltv.ltvValue, 0);
+    const anomalies = enriched.filter(c => c.zScore <= -1.5 || (c.churnRisk.trend < 0 && c.score < 2.5));
 
-  const byLocation: Record<string, { count: number; avgScore: number; scores: number[] }> = {};
-  enriched.forEach(c => {
-    const loc = c.location.split(',').pop()?.trim() || c.location;
-    if (!byLocation[loc]) byLocation[loc] = { count: 0, avgScore: 0, scores: [] };
-    byLocation[loc].count++;
-    byLocation[loc].scores.push(c.score);
-  });
-  Object.values(byLocation).forEach(v => { v.avgScore = v.scores.reduce((a, b) => a + b, 0) / v.scores.length; });
+    const byLevel = { STRATEGIC: 0, PREFERRED: 0, REGULAR: 0, HIGH_RISK: 0 };
+    enriched.forEach(c => byLevel[c.level]++);
 
-  const repCompanies = enriched.filter(c => c.latestRepScores);
-  const categoryAvgs = repCompanies.length > 0 ? {
-    Revenue: repCompanies.reduce((a, c) => a + (c.latestRepScores?.revenueAvg ?? 0), 0) / repCompanies.length,
-    Payment: repCompanies.reduce((a, c) => a + (c.latestRepScores?.paymentAvg ?? 0), 0) / repCompanies.length,
-    Operations: repCompanies.reduce((a, c) => a + (c.latestRepScores?.operationalAvg ?? 0), 0) / repCompanies.length,
-    Relationship: repCompanies.reduce((a, c) => a + (c.latestRepScores?.relationshipAvg ?? 0), 0) / repCompanies.length,
-    Value: repCompanies.reduce((a, c) => a + (c.latestRepScores?.valueAvg ?? 0), 0) / repCompanies.length,
-  } : null;
+    const byStatus = { NEW_ONLY: 0, ACTIVE_REPEATED: 0, LAPSED: 0 };
+    enriched.forEach(c => byStatus[c.status]++);
 
-  const conversionRate = total > 0 ? (byStatus.ACTIVE_REPEATED / total * 100) : 0;
+    const lapseRisk = enriched.filter(c => c.status === 'ACTIVE_REPEATED' && c.yrsLapse !== null && c.yrsLapse < 1).sort((a, b) => (a.yrsLapse ?? 99) - (b.yrsLapse ?? 99));
+    const topPerformers = [...enriched].filter(c => c.status === 'ACTIVE_REPEATED').sort((a, b) => b.score - a.score).slice(0, 5);
+    const awaitingFollowUp = enriched.filter(c => c.status === 'NEW_ONLY').sort((a, b) => b.score - a.score);
 
-  const insights: { type: 'warning' | 'success' | 'info'; message: string; action: string }[] = [];
-  if (lapseRisk.length > 0) insights.push({ type: 'warning', message: `${lapseRisk.length} client mendekati batas 3 tahun lapse`, action: 'Prioritaskan deal baru' });
-  if (awaitingFollowUp.length > 0) insights.push({ type: 'info', message: `${awaitingFollowUp.length} client baru belum ada penilaian lanjutan`, action: 'Tindak lanjuti' });
-  if (decliningCount > 0) insights.push({ type: 'warning', message: `${decliningCount} client menunjukkan tren skor menurun`, action: 'Review & improvement' });
-  if (improvingCount > 0) insights.push({ type: 'success', message: `${improvingCount} client menunjukkan tren skor meningkat`, action: 'Pertahankan' });
-  if (byLevel.HIGH_RISK > 0) insights.push({ type: 'warning', message: `${byLevel.HIGH_RISK} client dalam kategori HIGH RISK`, action: 'Evaluasi kerjasama' });
+    const scoreRanges = [
+      { range: '1.0-1.9', min: 1, max: 1.99, count: 0, color: '#ef4444' },
+      { range: '2.0-2.9', min: 2, max: 2.99, count: 0, color: '#f59e0b' },
+      { range: '3.0-3.4', min: 3, max: 3.49, count: 0, color: '#3b82f6' },
+      { range: '3.5-3.9', min: 3.5, max: 3.99, count: 0, color: '#6366f1' },
+      { range: '4.0-4.4', min: 4, max: 4.49, count: 0, color: '#10b981' },
+      { range: '4.5-5.0', min: 4.5, max: 5, count: 0, color: '#059669' },
+    ];
+    enriched.forEach(c => {
+      const r = scoreRanges.find(sr => c.score >= sr.min && c.score <= sr.max);
+      if (r) r.count++;
+    });
 
-  if (anomalies.length > 0) insights.push({ type: 'warning', message: `${anomalies.length} client menunjukkan anomali statistik penurunan ekstrem (Z-Score < -1.5)`, action: 'Investigasi Segera' });
+    // BUG-06 FIX: scope improving/declining to ACTIVE_REPEATED only.
+    // Old code counted ALL companies with 2+ assessments (including LAPSED),
+    // then subtracted from ACTIVE_REPEATED count → stableCount could go negative.
+    const activeWithTrend = enriched.filter(c => c.status === 'ACTIVE_REPEATED' && c.hasImproved !== null);
+    const improvingCount = activeWithTrend.filter(c => c.hasImproved === true).length;
+    const decliningCount = activeWithTrend.filter(c => c.hasImproved === false).length;
+    const stableCount = Math.max(0, byStatus.ACTIVE_REPEATED - improvingCount - decliningCount);
 
-  return {
-    enriched, total, avgScore, totalFleet, byLevel, byStatus, lapseRisk,
-    topPerformers, awaitingFollowUp, scoreRanges, improvingCount, decliningCount,
-    stableCount, byLocation, categoryAvgs, conversionRate, insights, totalLTV, anomalies
-  };
+    const byLocation: Record<string, { count: number; avgScore: number; scores: number[] }> = {};
+    enriched.forEach(c => {
+      const loc = c.location.split(',').pop()?.trim() || c.location || 'Unknown';
+      if (!byLocation[loc]) byLocation[loc] = { count: 0, avgScore: 0, scores: [] };
+      byLocation[loc].count++;
+      byLocation[loc].scores.push(c.score);
+    });
+    Object.values(byLocation).forEach(v => { v.avgScore = v.scores.reduce((a, b) => a + b, 0) / v.scores.length; });
+
+    const repCompanies = enriched.filter(c => c.latestRepScores);
+    const categoryAvgs = repCompanies.length > 0 ? {
+      Revenue: repCompanies.reduce((a, c) => a + (c.latestRepScores?.revenueAvg ?? 0), 0) / repCompanies.length,
+      Payment: repCompanies.reduce((a, c) => a + (c.latestRepScores?.paymentAvg ?? 0), 0) / repCompanies.length,
+      Operations: repCompanies.reduce((a, c) => a + (c.latestRepScores?.operationalAvg ?? 0), 0) / repCompanies.length,
+      Relationship: repCompanies.reduce((a, c) => a + (c.latestRepScores?.relationshipAvg ?? 0), 0) / repCompanies.length,
+      Value: repCompanies.reduce((a, c) => a + (c.latestRepScores?.valueAvg ?? 0), 0) / repCompanies.length,
+    } : null;
+
+    const conversionRate = total > 0 ? (byStatus.ACTIVE_REPEATED / total * 100) : 0;
+
+    const insights: { type: 'warning' | 'success' | 'info'; message: string; action: string }[] = [];
+    if (lapseRisk.length > 0) insights.push({ type: 'warning', message: `${lapseRisk.length} client mendekati batas 3 tahun lapse`, action: 'Prioritaskan deal baru' });
+    if (awaitingFollowUp.length > 0) insights.push({ type: 'info', message: `${awaitingFollowUp.length} client baru belum ada penilaian lanjutan`, action: 'Tindak lanjuti' });
+    if (decliningCount > 0) insights.push({ type: 'warning', message: `${decliningCount} client menunjukkan tren skor menurun`, action: 'Review & improvement' });
+    if (improvingCount > 0) insights.push({ type: 'success', message: `${improvingCount} client menunjukkan tren skor meningkat`, action: 'Pertahankan' });
+    if (byLevel.HIGH_RISK > 0) insights.push({ type: 'warning', message: `${byLevel.HIGH_RISK} client dalam kategori HIGH RISK`, action: 'Evaluasi kerjasama' });
+    if (anomalies.length > 0) insights.push({ type: 'warning', message: `${anomalies.length} client menunjukkan anomali statistik penurunan ekstrem (Z-Score < -1.5)`, action: 'Investigasi Segera' });
+
+    return {
+      enriched, total, avgScore, totalFleet, byLevel, byStatus, lapseRisk,
+      topPerformers, awaitingFollowUp, scoreRanges, improvingCount, decliningCount,
+      stableCount, byLocation, categoryAvgs, conversionRate, insights, totalLTV, anomalies
+    };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [companies]);
 }
 
 // ==================== MAIN DASHBOARD ====================

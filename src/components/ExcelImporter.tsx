@@ -148,6 +148,10 @@ export function ExcelImporter({ onImportComplete }: ExcelImporterProps) {
     setLoading(true);
     setResult(null);
 
+    // PERF-04 FIX: defer CPU-bound XLSX parsing to avoid freezing the UI thread.
+    // setTimeout(0) yields to the browser event loop first so the loading spinner renders.
+    await new Promise<void>(resolve => setTimeout(resolve, 0));
+
     try {
       const data = await file.arrayBuffer();
       // cellDates:true → Excel date serials become JS Date objects (midnight UTC-normalized later)
@@ -157,8 +161,14 @@ export function ExcelImporter({ onImportComplete }: ExcelImporterProps) {
       let success = 0;
       let failed = 0;
       const notes: string[] = [];
-      // Track earliest actual arrival per company (for registeredDate + lamaKerjasama)
+      // Track earliest actual arrival per company (for registeredDate & lamaKerjasama)
       const earliestArrivalPerCompany = new Map<string, string>();
+
+      // BUG-05 FIX: Build an in-memory company map ONCE at the start of import.
+      // Old code called getCompanies() (full localStorage JSON.parse) on every single row,
+      // causing 300-400 redundant deserializations during a 100-row import.
+      const companyMap = new Map<string, ReturnType<typeof getCompanies>[number]>();
+      getCompanies().forEach(c => companyMap.set(c.companyName.toLowerCase(), c));
 
       for (const sheetName of workbook.SheetNames) {
         const sheet = workbook.Sheets[sheetName];
@@ -284,7 +294,8 @@ export function ExcelImporter({ onImportComplete }: ExcelImporterProps) {
             }
 
             // ── FIND OR CREATE COMPANY ────────────────────────────────────────
-            let existing = getCompanies().find(c => c.companyName.toLowerCase() === companyName.toLowerCase());
+            // BUG-05 FIX: use in-memory companyMap instead of calling getCompanies() every row
+            let existing = companyMap.get(companyName.toLowerCase());
             if (!existing) {
               // registeredDate = first actual arrival date for this company
               const registeredDate = earliestArrivalPerCompany.get(companyKey)
@@ -300,12 +311,12 @@ export function ExcelImporter({ onImportComplete }: ExcelImporterProps) {
                 industry: 'Maritime',
                 registeredDate,
               });
+              companyMap.set(companyName.toLowerCase(), existing);
             } else {
-              // Update fleet size if bigger
+              // Update fleet size if bigger (in-memory map update)
               if (fleetSize > existing.fleetSize) {
-                const all = getCompanies();
-                const c = all.find(c => c.id === existing!.id);
-                if (c) { c.fleetSize = fleetSize; }
+                existing = { ...existing, fleetSize };
+                companyMap.set(companyName.toLowerCase(), existing);
               }
             }
 
@@ -469,16 +480,23 @@ export function ExcelImporter({ onImportComplete }: ExcelImporterProps) {
             }
 
             // ── REPEATED ASSESSMENT (Lanjutan/Follow-up) ──────────────────────
-            // lamaKerjasama = years from earliest known arrival for this company in this import
+            // lamaKerjasama = years from earliest known arrival for this company
+            // BUG-10 FIX: use assessmentDate (the project's date) as end reference,
+            // NOT Date.now(). Importing historical 2020 data with Date.now() would
+            // compute 5+ years instead of the correct 0-1 years at that project time.
             const earliestKnown = earliestArrivalPerCompany.get(companyKey);
             let lamaKerjasama = 1;
-            if (earliestKnown && actualArrivalISO) {
+            if (earliestKnown && actualArrivalISO && actualArrivalISO !== earliestKnown) {
               const diffMs = new Date(actualArrivalISO).getTime() - new Date(earliestKnown).getTime();
               lamaKerjasama = Math.max(1, Math.round(diffMs / (1000 * 60 * 60 * 24 * 365)));
-            } else {
-              // Fallback: from existing assessments in store
+            } else if (existing.repeatedAssessments.length > 0 || existing.newAssessments.length > 0) {
+              // Fallback: compute from first known assessment relative to current project date
               const oldest = existing.repeatedAssessments[0]?.date || existing.newAssessments[0]?.date;
-              if (oldest) lamaKerjasama = Math.max(1, Math.round((Date.now() - new Date(oldest).getTime()) / (1000 * 60 * 60 * 24 * 365)));
+              const refDate = actualArrivalISO ? new Date(actualArrivalISO) : new Date();
+              if (oldest) {
+                const diffMs = refDate.getTime() - new Date(oldest).getTime();
+                lamaKerjasama = Math.max(1, Math.round(diffMs / (1000 * 60 * 60 * 24 * 365)));
+              }
             }
 
             const repInput: RepeatedCustomerInput = {

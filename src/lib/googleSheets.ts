@@ -1,13 +1,20 @@
 import { google } from 'googleapis';
 
 /**
- * Returns an authenticated Google Sheets client using Service Account credentials.
+ * Singleton Google Sheets client — created once per server process.
  * Credentials must be set in environment variables:
  *   GOOGLE_SERVICE_ACCOUNT_EMAIL  - service account email
  *   GOOGLE_PRIVATE_KEY            - private key (from JSON, with \n replaced by actual newlines)
  *   GOOGLE_SPREADSHEET_ID         - the spreadsheet ID from the sheet URL
+ *
+ * PERF: Creating a new GoogleAuth + sheets client on every request was wasting
+ *       ~100ms per call and causing unnecessary token refreshes. Now singleton.
  */
+let _sheetsClient: ReturnType<typeof google.sheets> | null = null;
+
 export function getSheetsClient() {
+  if (_sheetsClient) return _sheetsClient;
+
   const email = process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL;
   const key = process.env.GOOGLE_PRIVATE_KEY?.replace(/\\n/g, '\n');
 
@@ -25,7 +32,8 @@ export function getSheetsClient() {
     ],
   });
 
-  return google.sheets({ version: 'v4', auth });
+  _sheetsClient = google.sheets({ version: 'v4', auth });
+  return _sheetsClient;
 }
 
 export const SPREADSHEET_ID = process.env.GOOGLE_SPREADSHEET_ID ?? '';

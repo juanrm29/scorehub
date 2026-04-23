@@ -64,9 +64,35 @@ function parseNum(v: string): number | undefined {
   return isNaN(num) ? undefined : num;
 }
 
-// ── Ensure sheets + header rows exist ───────────────────────────────────────
+/**
+ * Convert a 0-based column index to a Sheets A1 column letter.
+ * e.g. 0→'A', 25→'Z', 26→'AA', 47→'AV'
+ * FIX BUG-03: old code used String.fromCharCode(65+n) which overflows after col 25 (Z)
+ */
+function colLetter(idx: number): string {
+  let result = '';
+  let n = idx;
+  do {
+    result = String.fromCharCode(65 + (n % 26)) + result;
+    n = Math.floor(n / 26) - 1;
+  } while (n >= 0);
+  return result;
+}
+
+// ── Ensure sheets + header rows exist (cached to avoid 6+ API calls per request) ─
+
+let _sheetsInitialized = false;
+let _sheetsInitTimer: ReturnType<typeof setTimeout> | null = null;
+
+/** Reset the init cache after 5 minutes so headers are re-verified periodically */
+function scheduleInitReset() {
+  if (_sheetsInitTimer) clearTimeout(_sheetsInitTimer);
+  _sheetsInitTimer = setTimeout(() => { _sheetsInitialized = false; }, 5 * 60 * 1000);
+}
 
 export async function ensureAllSheets(): Promise<void> {
+  if (_sheetsInitialized) return; // BUG-12 FIX: skip 6 API calls on every request
+
   await ensureSheet(COMPANIES_SHEET);
   await ensureSheet(NEW_SHEET);
   await ensureSheet(REPEATED_SHEET);
@@ -91,6 +117,9 @@ export async function ensureAllSheets(): Promise<void> {
       });
     }
   }
+
+  _sheetsInitialized = true;
+  scheduleInitReset();
 }
 
 // ── Generic upsert (find row by col A = id, update in-place or append) ───────
@@ -106,13 +135,15 @@ async function upsertRow(
   // Row 0 = header, data starts at row 1 (Sheets row 2)
   const idx = rows.findIndex((r, i) => i > 0 && r[0] === id);
 
+  // BUG-03 FIX: use colLetter() for correct A1 notation beyond column Z
+  const lastColLetter = colLetter(values.length - 1);
+
   if (idx !== -1) {
     // Update existing row (1-indexed sheet row)
     const sheetRow = idx + 1;
-    const lastCol = String.fromCharCode(65 + values.length - 1);
     await sheets.spreadsheets.values.update({
       spreadsheetId: SPREADSHEET_ID,
-      range: `${sheetName}!A${sheetRow}:${lastCol}${sheetRow}`,
+      range: `${sheetName}!A${sheetRow}:${lastColLetter}${sheetRow}`,
       valueInputOption: 'USER_ENTERED',
       requestBody: { values: [values] },
     });
@@ -484,23 +515,61 @@ export async function deleteAssessmentRow(
 
 /**
  * Hard delete a company row AND all its assessment rows.
+ * FIX BUG-04: deleting rows one-by-one shifts indices. We collect ALL row indices
+ * first across both sheets, then delete in reverse order so earlier indices stay valid.
  */
 export async function deleteCompanyRow(companyId: string): Promise<void> {
-  // Fetch assessment rows first, collect IDs belonging to this company
   const [newRows, repRows] = await Promise.all([
     fetchSheetRows(NEW_SHEET),
     fetchSheetRows(REPEATED_SHEET),
   ]);
 
-  const newIds  = newRows.filter((r, i) => i > 0 && r[1] === companyId).map(r => r[0]);
-  const repIds  = repRows.filter((r, i) => i > 0 && r[1] === companyId).map(r => r[0]);
+  const sheetId = await getSheetId(COMPANIES_SHEET);
+  const newSheetId = await getSheetId(NEW_SHEET);
+  const repSheetId = await getSheetId(REPEATED_SHEET);
+  const companyRows = await fetchSheetRows(COMPANIES_SHEET);
 
-  // Delete assessments first (rows above company don't shift company row)
-  // Process in reverse order so row indices don't shift during batch
-  for (const id of newIds) await deleteRowById(NEW_SHEET, id);
-  for (const id of repIds) await deleteRowById(REPEATED_SHEET, id);
+  // Collect 0-based row indices (inclusive of header row offset)
+  const newIndices = newRows
+    .map((r, i) => ({ r, i }))
+    .filter(({ r, i }) => i > 0 && r[1] === companyId)
+    .map(({ i }) => i);
 
-  // Delete company row
-  await deleteRowById(COMPANIES_SHEET, companyId);
+  const repIndices = repRows
+    .map((r, i) => ({ r, i }))
+    .filter(({ r, i }) => i > 0 && r[1] === companyId)
+    .map(({ i }) => i);
+
+  const companyIdx = companyRows.findIndex((r, i) => i > 0 && r[0] === companyId);
+
+  const sheets = getSheetsClient();
+
+  // Build batch delete requests — delete in reverse order to avoid index shifting
+  const requests: object[] = [];
+
+  // Sort descending so we delete bottom rows first
+  const buildDeleteReqs = (indices: number[], sid: number) =>
+    [...indices].sort((a, b) => b - a).map(idx => ({
+      deleteDimension: {
+        range: { sheetId: sid, dimension: 'ROWS', startIndex: idx, endIndex: idx + 1 },
+      },
+    }));
+
+  requests.push(...buildDeleteReqs(repIndices, repSheetId));
+  requests.push(...buildDeleteReqs(newIndices, newSheetId));
+  if (companyIdx !== -1) {
+    requests.push({
+      deleteDimension: {
+        range: { sheetId, dimension: 'ROWS', startIndex: companyIdx, endIndex: companyIdx + 1 },
+      },
+    });
+  }
+
+  if (requests.length === 0) return;
+
+  await sheets.spreadsheets.batchUpdate({
+    spreadsheetId: SPREADSHEET_ID,
+    requestBody: { requests },
+  });
 }
 

@@ -30,9 +30,23 @@ import { Company, NewAssessment, RepeatedAssessment } from '@/lib/types';
 
 export const dynamic = 'force-dynamic';
 
+// ── SEC-01: Lightweight internal API key guard ────────────────────────────────
+// Set INTERNAL_API_SECRET in .env.local to protect the endpoint.
+// The client (store.ts) must send this header on every request.
+// Falls back to permissive mode (no secret check) if the env var is absent (dev convenience).
+function isAuthorized(req: NextRequest): boolean {
+  const secret = process.env.INTERNAL_API_SECRET;
+  if (!secret) return true; // No secret configured → allow (dev / first-time setup)
+  const header = req.headers.get('x-api-secret');
+  return header === secret;
+}
+
 // ── GET: load all structured data ────────────────────────────────────────────
 
-export async function GET() {
+export async function GET(req: NextRequest) {
+  if (!isAuthorized(req)) {
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  }
   try {
     await ensureAllSheets();
     const companies = await loadAllData();
@@ -47,6 +61,9 @@ export async function GET() {
 // ── POST: write structured data ──────────────────────────────────────────────
 
 export async function POST(req: NextRequest) {
+  if (!isAuthorized(req)) {
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  }
   try {
     const body = await req.json();
     const { action } = body as { action: string };
@@ -99,6 +116,9 @@ export async function POST(req: NextRequest) {
 // ── DELETE: hard delete a row from Sheets ──────────────────────────────────────
 
 export async function DELETE(req: NextRequest) {
+  if (!isAuthorized(req)) {
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  }
   try {
     const body = await req.json();
     const { action } = body as { action: string };
