@@ -307,9 +307,9 @@ export default function Dashboard() {
           style={{ background: 'linear-gradient(135deg, rgba(59,130,246,0.05), rgba(139,92,246,0.05), rgba(16,185,129,0.03))' }}>
           <div className="absolute inset-0 opacity-30"
             style={{ backgroundImage: 'radial-gradient(circle at 20% 50%, rgba(59,130,246,0.08) 0%, transparent 50%), radial-gradient(circle at 80% 20%, rgba(139,92,246,0.08) 0%, transparent 50%)' }} />
-          <div className="relative flex items-center justify-between p-8">
-            <div className="flex-1">
-              <div className="flex items-center gap-3 mb-3">
+          <div className="relative flex flex-col lg:flex-row items-center justify-between p-6 lg:p-8 gap-6 lg:gap-0">
+            <div className="flex-1 text-center lg:text-left flex flex-col items-center lg:items-start">
+              <div className="flex items-center justify-center lg:justify-start gap-3 mb-3">
                 <div className="flex items-center gap-2 px-3 py-1.5 rounded-full bg-purple-500/10 border border-purple-500/20">
                   <Brain className="w-3.5 h-3.5 text-purple-400" />
                   <span className="text-[11px] text-purple-400 font-semibold uppercase tracking-[0.15em]">Decision Intelligence</span>
@@ -319,13 +319,13 @@ export default function Dashboard() {
                   <span className="text-[11px] text-emerald-400 font-medium">Live</span>
                 </div>
               </div>
-              <h1 className="text-4xl font-black tracking-tight bg-clip-text text-transparent drop-shadow-sm"
+              <h1 className="text-3xl lg:text-4xl font-black tracking-tight bg-clip-text text-transparent drop-shadow-sm text-center lg:text-left"
                 style={{ backgroundImage: 'linear-gradient(135deg, #ffffff 0%, #a0a0c0 100%)' }}>
                 SCOREHUB ANALYTICS
               </h1>
-              <p className="text-[#555] mt-2 text-sm max-w-md">Maritime client portfolio intelligence — powered by multi-dimensional scoring algorithms</p>
+              <p className="text-[#555] mt-2 text-sm max-w-md text-center lg:text-left">Maritime client portfolio intelligence — powered by multi-dimensional scoring algorithms</p>
             </div>
-            <div className="flex items-center gap-10">
+            <div className="flex flex-col sm:flex-row items-center gap-6 lg:gap-10">
               <ScoreRing score={a.avgScore} />
               <div className="space-y-3">
                 <div>
@@ -357,7 +357,7 @@ export default function Dashboard() {
         </motion.div>
 
         {/* ====== KPI CARDS ====== */}
-        <div className="grid grid-cols-5 gap-4">
+        <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-5 gap-4">
           <HexStat value={a.total} label="Total Companies" sub={`${a.totalFleet} fleet units`} color="#3b82f6" icon={Users} delay={100} />
           <HexStat value={a.avgScore.toFixed(2)} label="Portfolio Score" sub="Weighted average" color="#10b981" icon={Target} delay={200} />
           <HexStat value={`${a.conversionRate.toFixed(0)}%`} label="Conversion Rate" sub="New → Repeated" color="#8b5cf6" icon={Zap} delay={300} />
@@ -410,15 +410,15 @@ export default function Dashboard() {
         )}
 
         {/* ====== ADVANCED DATA SCIENCE ====== */}
-        <div className="grid grid-cols-12 gap-5">
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-5">
           {/* LTV Forecast */}
-          <div className="col-span-7 glass-strong rounded-2xl p-6 relative overflow-hidden flex flex-col group">
+          <div className="col-span-1 lg:col-span-7 glass-strong rounded-2xl p-6 relative overflow-hidden flex flex-col group min-h-[350px]">
             <div className="absolute top-0 right-0 w-64 h-64 opacity-5 pointer-events-none" style={{ background: 'radial-gradient(circle, #10b981, transparent 70%)' }} />
-            <div className="relative z-10 flex-1">
+            <div className="relative z-10 flex-1 h-full min-h-[250px]">
               <LTVForecastChart currentLTV={a.totalLTV} historicalTrend={5.2} />
             </div>
             
-            <div className="absolute top-6 right-6">
+            <div className="absolute top-6 right-6 z-20">
               <ChartTooltip content={
                 <>
                   <strong className="text-emerald-400 block mb-1">Cara Membaca Grafik:</strong>
@@ -427,14 +427,14 @@ export default function Dashboard() {
               } />
             </div>
             
-            <div className="mt-4 flex items-center justify-between text-xs text-[#666]">
+            <div className="mt-4 flex flex-col sm:flex-row items-start sm:items-center justify-between text-xs text-[#666] gap-2 sm:gap-0 z-10">
               <span className="flex items-center gap-1.5"><Activity className="w-3.5 h-3.5 text-emerald-400" /> Algoritma Prediksi Regresi</span>
               <span>Proyeksi 3-5 Tahun (Asumsi churn rate konstan)</span>
             </div>
           </div>
 
           {/* Risk vs Value Matrix */}
-          <div className="col-span-5 glass rounded-2xl p-6 relative overflow-hidden flex flex-col">
+          <div className="col-span-1 lg:col-span-5 glass rounded-2xl p-6 relative overflow-hidden flex flex-col min-h-[350px]">
             <div className="flex items-center justify-between mb-4">
               <h2 className="text-sm font-bold flex items-center gap-2">
                 <Target className="w-4 h-4 text-amber-400" />The Risk Matrix (Churn vs LTV)
@@ -460,9 +460,9 @@ export default function Dashboard() {
         </div>
 
         {/* ====== MAIN GRID ====== */}
-        <div className="grid grid-cols-12 gap-5">
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-5">
           {/* Pipeline */}
-          <div className="col-span-3 glass rounded-2xl p-6 relative overflow-hidden">
+          <div className="col-span-1 lg:col-span-3 glass rounded-2xl p-6 relative overflow-hidden">
             <div className="absolute bottom-0 left-0 w-full h-32 opacity-5"
               style={{ background: 'linear-gradient(to top, #06b6d4, transparent)' }} />
             <div className="flex items-center justify-between mb-5">
@@ -513,7 +513,7 @@ export default function Dashboard() {
           </div>
 
           {/* Score Distribution */}
-          <div className="col-span-5 glass rounded-2xl p-6 relative overflow-hidden">
+          <div className="col-span-1 lg:col-span-5 glass rounded-2xl p-6 relative overflow-hidden">
             <div className="absolute top-0 right-0 w-40 h-40 opacity-5" style={{ background: 'radial-gradient(circle, #3b82f6, transparent 70%)' }} />
             <div className="flex items-center justify-between mb-5">
               <h2 className="text-sm font-bold flex items-center gap-2">
@@ -570,7 +570,7 @@ export default function Dashboard() {
           </div>
 
           {/* Radar */}
-          <div className="col-span-4 glass rounded-2xl p-6 relative overflow-hidden">
+          <div className="col-span-1 lg:col-span-4 glass rounded-2xl p-6 relative overflow-hidden">
             <div className="absolute bottom-0 right-0 w-48 h-48 opacity-5" style={{ background: 'radial-gradient(circle, #8b5cf6, transparent 70%)' }} />
             <div className="flex items-center justify-between mb-5">
               <h2 className="text-sm font-bold flex items-center gap-2">
@@ -610,7 +610,7 @@ export default function Dashboard() {
         </div>
 
         {/* ====== RISK + TOP + FOLLOWUP ====== */}
-        <div className="grid grid-cols-3 gap-5">
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
           {/* Lapse Risk */}
           <div className="glass rounded-2xl p-6 relative overflow-hidden">
             <div className="absolute top-0 left-0 w-full h-px bg-gradient-to-r from-transparent via-red-500/30 to-transparent" />

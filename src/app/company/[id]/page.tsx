@@ -170,24 +170,24 @@ export default function CompanyDetailPage() {
         <Link href="/data-master" className="inline-flex items-center gap-1.5 text-sm text-[#666] hover:text-blue-400 transition-colors mb-4">
           <ArrowLeft className="w-4 h-4" /> Back to Data Master
         </Link>
-        <div className="flex items-start justify-between">
+        <div className="flex flex-col md:flex-row items-start justify-between gap-6 md:gap-0">
           <div>
-            <h1 className="text-3xl font-bold">{company.companyName}</h1>
-            <div className="flex items-center gap-4 mt-2">
+            <h1 className="text-2xl md:text-3xl font-bold">{company.companyName}</h1>
+            <div className="flex flex-wrap items-center gap-2 md:gap-4 mt-2">
               <StatusBadge status={status} />
               <LevelBadge level={currentLevel} />
             </div>
           </div>
-          <div className="flex flex-col items-end gap-3">
+          <div className="flex flex-col items-start md:items-end gap-3 w-full md:w-auto">
             <ScoreRing score={currentScore} level={currentLevel} size={120} label="Current Score" />
-            <button onClick={() => exportCompanyReportPDF(company)} className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-gradient-to-r from-blue-600/20 to-purple-600/20 border border-blue-500/20 text-blue-400 text-xs font-semibold hover:border-blue-500/40 hover:from-blue-600/30 hover:to-purple-600/30 transition-all">
+            <button onClick={() => exportCompanyReportPDF(company)} className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-gradient-to-r from-blue-600/20 to-purple-600/20 border border-blue-500/20 text-blue-400 text-xs font-semibold hover:border-blue-500/40 hover:from-blue-600/30 hover:to-purple-600/30 transition-all w-full md:w-auto justify-center">
               <Download className="w-3.5 h-3.5" /> Export Full Report (PDF)
             </button>
           </div>
         </div>
       </motion.div>
 
-      <div className="grid grid-cols-6 gap-4">
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-4">
         {[
           { icon: <User className="w-4 h-4 text-blue-400" />, label: 'Contact', value: company.contactPerson },
           { icon: <MapPin className="w-4 h-4 text-purple-400" />, label: 'Location', value: company.location },
@@ -217,7 +217,7 @@ export default function CompanyDetailPage() {
 
       {/* Predictive Intelligence */}
       {status === 'ACTIVE_REPEATED' && (
-        <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.2 }} className="grid grid-cols-2 gap-4">
+        <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.2 }} className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <div className="glass-strong rounded-2xl p-5 border border-white/[0.05]">
             <h2 className="text-sm font-semibold flex items-center gap-2 mb-4">
               <Activity className="w-4 h-4 text-rose-400" /> Churn Risk Analysis
@@ -343,11 +343,11 @@ export default function CompanyDetailPage() {
                     <div className="w-2 h-2 rounded-full" style={{ background: color }} />
                   </div>
 
-                  <div className="rounded-xl border border-[#1a1a2e] p-5 hover:border-[#2a2a3a] transition-all">
-                    <div className="flex items-start justify-between mb-3">
+                  <div className="rounded-xl border border-[#1a1a2e] p-4 md:p-5 hover:border-[#2a2a3a] transition-all">
+                    <div className="flex flex-col md:flex-row items-start justify-between mb-3 gap-4 md:gap-0">
                       <div>
                         <div className="flex items-center gap-2 mb-1">
-                          <span className="text-xs px-2 py-0.5 rounded-md font-semibold" style={{ background: `${color}15`, color }}>
+                          <span className="text-[10px] md:text-xs px-2 py-0.5 rounded-md font-semibold" style={{ background: `${color}15`, color }}>
                             {isNew ? '🆕 NEW — Pre-judgement' : '🔄 REPEATED — Follow-up'}
                           </span>
                           {prevScore !== null && <TrendIndicator current={assessment.score} previous={prevScore} />}
@@ -358,27 +358,27 @@ export default function CompanyDetailPage() {
                           {!isNew && ` • Period: ${(assessment.data as RepeatedAssessment).periodStart} — ${(assessment.data as RepeatedAssessment).periodEnd}`}
                         </p>
                       </div>
-                      <div className="text-right flex flex-col items-end gap-2">
+                      <div className="text-left md:text-right flex flex-col items-start md:items-end gap-2 w-full md:w-auto">
                         <span className="text-2xl font-mono font-bold" style={{ color: getLevelColor(isNew ? (assessment.data as NewAssessment).scores.level : (assessment.data as RepeatedAssessment).scores.level) }}>
                           {assessment.score.toFixed(2)}
                         </span>
                         <div className="mt-1">
                           <LevelBadge level={isNew ? (assessment.data as NewAssessment).scores.level : (assessment.data as RepeatedAssessment).scores.level} />
                         </div>
-                        <div className="flex items-center gap-1.5 mt-1">
+                        <div className="flex flex-wrap items-center gap-1.5 mt-1 w-full md:w-auto">
                           <button
                             onClick={() => setEditingAssessment({ data: assessment.data, type: assessment.type })}
-                            className="inline-flex items-center gap-1 px-2 py-1 rounded-md text-[10px] font-semibold border border-blue-500/20 text-blue-400 hover:bg-blue-500/20 transition-all"
+                            className="flex-1 md:flex-none justify-center inline-flex items-center gap-1 px-2 py-1.5 rounded-md text-[10px] font-semibold border border-blue-500/20 text-blue-400 hover:bg-blue-500/20 transition-all"
                           >
                             <Edit2 className="w-3 h-3" /> Edit
                           </button>
                           <button
                             onClick={() => handleDeleteAssessment(assessment.data.id, assessment.type)}
-                            className="inline-flex items-center gap-1 px-2 py-1 rounded-md text-[10px] font-semibold border border-red-500/20 text-red-400 hover:bg-red-500/20 transition-all"
+                            className="flex-1 md:flex-none justify-center inline-flex items-center gap-1 px-2 py-1.5 rounded-md text-[10px] font-semibold border border-red-500/20 text-red-400 hover:bg-red-500/20 transition-all"
                           >
                             <Trash2 className="w-3 h-3" /> Hapus
                           </button>
-                          <button onClick={() => exportAssessmentPDF(company, assessment.data as NewAssessment | RepeatedAssessment, assessment.type)} className="inline-flex items-center gap-1 px-2 py-1 rounded-md text-[10px] font-semibold border border-[#2a2a3a] text-[#666] hover:text-blue-400 hover:border-blue-500/30 transition-all">
+                          <button onClick={() => exportAssessmentPDF(company, assessment.data as NewAssessment | RepeatedAssessment, assessment.type)} className="flex-1 md:flex-none justify-center inline-flex items-center gap-1 px-2 py-1.5 rounded-md text-[10px] font-semibold border border-[#2a2a3a] text-[#666] hover:text-blue-400 hover:border-blue-500/30 transition-all">
                             <Download className="w-3 h-3" /> PDF
                           </button>
                         </div>
@@ -389,7 +389,7 @@ export default function CompanyDetailPage() {
                     {isNew ? (() => {
                       const s = (assessment.data as NewAssessment).scores;
                       return (
-                        <div className="grid grid-cols-3 gap-4 mt-4 pt-4 border-t border-[#1a1a2e]">
+                        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4 mt-4 pt-4 border-t border-[#1a1a2e]">
                           <div>
                             <p className="text-[10px] font-bold text-blue-400 uppercase mb-2">Commercial (50%)</p>
                             <ScoreBar label="Fleet Size" score={s.fleetScore} />
@@ -415,7 +415,7 @@ export default function CompanyDetailPage() {
                     })() : (() => {
                       const s = (assessment.data as RepeatedAssessment).scores;
                       return (
-                        <div className="grid grid-cols-5 gap-4 mt-4 pt-4 border-t border-[#1a1a2e]">
+                        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4 mt-4 pt-4 border-t border-[#1a1a2e]">
                           <div>
                             <p className="text-[10px] font-bold text-green-400 uppercase mb-2">Revenue (30%)</p>
                             <ScoreBar label="Omset" score={s.kontribusiOmsetScore} />

@@ -64,7 +64,7 @@ export default function DataMasterPage() {
     <div className="space-y-8 relative">
       <div className="fixed top-20 right-40 w-80 h-80 bg-purple-500/[0.03] rounded-full blur-[120px] pointer-events-none" />
 
-      <motion.div initial={{ opacity: 0, y: -20 }} animate={{ opacity: 1, y: 0 }} className="flex items-center justify-between">
+      <motion.div initial={{ opacity: 0, y: -20 }} animate={{ opacity: 1, y: 0 }} className="flex flex-col md:flex-row items-start md:items-center justify-between gap-6 md:gap-0">
         <div>
           <div className="flex items-center gap-2 mb-1">
             <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-purple-500/20 to-pink-500/20 flex items-center justify-center">
@@ -75,13 +75,13 @@ export default function DataMasterPage() {
           <h1 className="text-3xl font-black text-gradient">Data Master</h1>
           <p className="text-[#555] mt-1 text-sm">Click any company row to view detailed assessment history</p>
         </div>
-        <div className="flex items-center gap-3">
-          <div className="relative">
-            <button onClick={() => setShowDeleteMenu(!showDeleteMenu)} className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-red-500/10 border border-red-500/20 text-red-400 text-sm font-semibold hover:bg-red-500/20 hover:border-red-500/40 transition-all">
+        <div className="flex flex-col sm:flex-row items-center gap-3 w-full md:w-auto">
+          <div className="relative w-full sm:w-auto">
+            <button onClick={() => setShowDeleteMenu(!showDeleteMenu)} className="w-full sm:w-auto justify-center inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-red-500/10 border border-red-500/20 text-red-400 text-sm font-semibold hover:bg-red-500/20 hover:border-red-500/40 transition-all">
               <Trash2 className="w-4 h-4" /> Hapus Data
             </button>
             {showDeleteMenu && (
-              <div className="absolute top-full right-0 mt-2 w-56 p-2 rounded-xl bg-[#161622] border border-white/[0.08] shadow-2xl z-50 flex flex-col gap-1">
+              <div className="absolute top-full right-0 sm:left-auto mt-2 w-full sm:w-56 p-2 rounded-xl bg-[#161622] border border-white/[0.08] shadow-2xl z-50 flex flex-col gap-1">
                 <div className="flex items-center justify-between px-2 pb-2 mb-1 border-b border-white/[0.08]">
                   <span className="text-xs font-semibold text-[#888] uppercase tracking-wider">Pilih Kategori</span>
                   <button onClick={() => setShowDeleteMenu(false)} className="text-[#666] hover:text-white transition-colors"><X className="w-4 h-4" /></button>
@@ -94,8 +94,10 @@ export default function DataMasterPage() {
               </div>
             )}
           </div>
-          <ExcelImporter onImportComplete={refreshData} />
-          <button onClick={() => exportDataMasterExcel(companies)} className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-gradient-to-r from-emerald-600/20 to-cyan-600/20 border border-emerald-500/20 text-emerald-400 text-sm font-semibold hover:border-emerald-500/40 hover:from-emerald-600/30 hover:to-cyan-600/30 transition-all">
+          <div className="w-full sm:w-auto flex">
+            <ExcelImporter onImportComplete={refreshData} />
+          </div>
+          <button onClick={() => exportDataMasterExcel(companies)} className="w-full sm:w-auto justify-center inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-gradient-to-r from-emerald-600/20 to-cyan-600/20 border border-emerald-500/20 text-emerald-400 text-sm font-semibold hover:border-emerald-500/40 hover:from-emerald-600/30 hover:to-cyan-600/30 transition-all">
             <Download className="w-4 h-4" /> Export Excel
           </button>
         </div>
@@ -105,7 +107,7 @@ export default function DataMasterPage() {
       <SheetsSyncPanel />
 
       {/* Status Summary */}
-      <div className="grid grid-cols-4 gap-4">
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
         <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.1 }} className="glass-strong rounded-xl p-4 relative overflow-hidden">
           <div className="absolute top-0 left-0 w-full h-px bg-gradient-to-r from-transparent via-blue-500/40 to-transparent" />
           <p className="text-xs text-[#555] mb-1">Total Companies</p>
@@ -133,14 +135,14 @@ export default function DataMasterPage() {
 
       {/* Filters */}
       <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.3 }} className="glass-strong rounded-2xl p-5 gradient-border">
-        <div className="flex items-center gap-4">
+        <div className="flex flex-col md:flex-row items-stretch md:items-center gap-4">
           <div className="flex-1 relative">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-[#555]" />
-            <input type="text" placeholder="Search company, contact, location..." value={search} onChange={e => setSearch(e.target.value)} className="pl-10" />
+            <input type="text" placeholder="Search company, contact, location..." value={search} onChange={e => setSearch(e.target.value)} className="pl-10 w-full" />
           </div>
           <div className="relative">
             <Filter className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-[#555]" />
-            <select value={filterLevel} onChange={e => setFilterLevel(e.target.value)} className="pl-10 pr-10 w-44">
+            <select value={filterLevel} onChange={e => setFilterLevel(e.target.value)} className="pl-10 pr-10 w-full md:w-44">
               <option value="ALL">All Levels</option>
               <option value="STRATEGIC">Strategic</option>
               <option value="PREFERRED">Preferred</option>
@@ -151,7 +153,7 @@ export default function DataMasterPage() {
           </div>
           <div className="relative">
             <Ship className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-[#555]" />
-            <select value={filterStatus} onChange={e => setFilterStatus(e.target.value)} className="pl-10 pr-10 w-52">
+            <select value={filterStatus} onChange={e => setFilterStatus(e.target.value)} className="pl-10 pr-10 w-full md:w-52">
               <option value="ALL">All Status</option>
               <option value="NEW_ONLY">Pre-judgement Only</option>
               <option value="ACTIVE_REPEATED">Active Repeated</option>
