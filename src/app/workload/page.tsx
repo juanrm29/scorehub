@@ -418,13 +418,13 @@ export default function WorkloadPage() {
                       {result.validations.allPassed ? 'All Engineering Validations Passed' : 'Validation Warnings Detected'}
                     </p>
                     <p className="text-[11px] text-[#888] mt-0.5">
-                      Simpson vs Parametric Error: <span className="font-mono text-white">{(result.validations.simpsonError * 100).toFixed(2)}%</span>
+                      Gauss-Legendre vs Parametric Error: <span className="font-mono text-white">{(result.validations.errorMargin * 100).toFixed(2)}%</span>
                     </p>
                   </div>
                 </div>
                 {!result.validations.allPassed && (
                   <div className="text-[10px] text-[#888] space-y-0.5 text-right font-mono">
-                    {!result.validations.simpsonValid && <p className="text-amber-400">Simpson Error &gt; 5%</p>}
+                    {!result.validations.methodValid && <p className="text-amber-400">Integration Error &gt; 10%</p>}
                     {!result.validations.lbRatioValid && <p className="text-amber-400">L/B Ratio Abnormal</p>}
                     {!result.validations.btRatioValid && <p className="text-amber-400">B/T Ratio Abnormal</p>}
                     {!result.validations.wsaRatioValid && <p className="text-amber-400">WSA Ratio Abnormal</p>}
@@ -439,7 +439,7 @@ export default function WorkloadPage() {
                 </h2>
                 
                 <div className="grid grid-cols-4 gap-4 mb-6">
-                  <CardValue label="Total B&P Area" value={result.technical.totalBP_Area.toFixed(1)} unit="m²" color="#3b82f6" subtitle={`WSA Simpson: ${result.technical.wsaSimpson.toFixed(1)} m²`} />
+                  <CardValue label="Total B&P Area" value={result.technical.totalBP_Area.toFixed(1)} unit="m²" color="#3b82f6" subtitle={`eWSA (Ensemble): ${result.technical.wsaEnsemble.toFixed(1)} m²`} />
                   <CardValue label="Total Structure Weight" value={result.technical.totalStructureTon.toFixed(1)} unit="ton" color="#8b5cf6" subtitle={`For ${category}`} />
                   <CardValue label="Replating Estimate" value={result.technical.replatingWeightKg.toFixed(0)} unit="kg" color="#06b6d4" subtitle="5% rule of thumb" />
                   <CardValue label="Total Man-Day" value={result.technical.manDayBP.toFixed(1)} unit="MD" color="#10b981" subtitle={`@ 8 MH/day`} />
@@ -470,7 +470,7 @@ export default function WorkloadPage() {
                   {/* Simpson Integration Chart */}
                   <div className="bg-[#1a1a2e] rounded-xl p-4 border border-[#2a2a3a] flex flex-col">
                     <h3 className="text-xs font-bold text-[#888] uppercase tracking-wider mb-2 flex items-center gap-2">
-                      <Waves className="w-3.5 h-3.5" /> Hull Shape Integration (Simpson's Rule)
+                      <Waves className="w-3.5 h-3.5" /> Hull Shape Profile
                     </h3>
                     <div className="flex-1 min-h-[150px] mt-2">
                       <ResponsiveContainer width="100%" height="100%">
@@ -509,7 +509,7 @@ export default function WorkloadPage() {
                         <h4 className="text-xs font-bold text-blue-400 mb-2 flex items-center gap-1.5"><Droplet className="w-3 h-3"/> 1. Underwater</h4>
                         <div className="space-y-1.5">
                           <div className="flex justify-between text-xs text-[#ccc]"><span>Lambung Bawah</span> <span className="font-mono">{result.bnpBreakdown.underwater.lambungBawah.toFixed(1)} m²</span></div>
-                          <div className="flex justify-between text-xs text-[#ccc]"><span>Skeg (Tugboat Only)</span> <span className="font-mono">{result.bnpBreakdown.underwater.skeg.toFixed(1)} m²</span></div>
+                          <div className="flex justify-between text-xs text-[#ccc]"><span>Skeg / Rudder Protector</span> <span className="font-mono">{result.bnpBreakdown.underwater.skeg.toFixed(1)} m²</span></div>
                           <div className="flex justify-between text-xs font-bold text-white pt-1.5 mt-1 border-t border-white/10"><span>Total Underwater</span> <span className="font-mono text-blue-300">{result.bnpBreakdown.underwater.total.toFixed(1)} m²</span></div>
                         </div>
                       </div>
